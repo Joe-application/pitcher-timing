@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { TUTORIAL, type TutorialPage } from '../../game/messages';
+import { TUTORIAL, ZONE, type TutorialPage } from '../../game/messages';
 import { DEFAULT_BASELINE } from '../../sim/constants';
 import { fromCards } from '../../sim/timing';
 import { R } from '../components/Ruby';
 import { PatternBar, SegmentLegend } from '../components/Timeline';
+import { ZoneLegend, ZonePicker } from '../components/ZonePicker';
 import { useApp } from '../state';
 
-const pat = (s1: -1 | 0 | 1, s3: -1 | 0 | 1 | 2) => fromCards(DEFAULT_BASELINE, { s1, s3 });
+const pat = (s1: -1 | 0 | 1, s2: -1 | 0 | 1, s3: -1 | 0 | 1 | 2) => fromCards(DEFAULT_BASELINE, { s1, s2, s3 });
 
 function Rows({ rows }: { rows: { label: string; p: ReturnType<typeof pat>; note?: string }[] }) {
   return (
@@ -35,7 +36,7 @@ function Figure({ kind }: { kind: NonNullable<TutorialPage['figure']> }) {
       return (
         <div className="tut-figure">
           <SegmentLegend />
-          <PatternBar p={pat(0, 0)} scale={2.4} showSeconds />
+          <PatternBar p={pat(0, 0, 0)} scale={2.4} showSeconds />
           <p className="small-text muted">
             <R>{'セット（{止|と}まる）→ {足|あし}を{上|あ}げる → いちばん{高|たか}いところ → {前|まえ}へ → リリース'}</R>
           </p>
@@ -45,9 +46,9 @@ function Figure({ kind }: { kind: NonNullable<TutorialPage['figure']> }) {
       return (
         <Rows
           rows={[
-            { label: '1{球目|きゅうめ}', p: pat(0, 0), note: '🙂' },
-            { label: '2{球目|きゅうめ}', p: pat(0, 0), note: '👀' },
-            { label: '3{球目|きゅうめ}', p: pat(0, 0), note: '💥 {打|う}たれる' },
+            { label: '1{球目|きゅうめ}', p: pat(0, 0, 0), note: '🙂' },
+            { label: '2{球目|きゅうめ}', p: pat(0, 0, 0), note: '👀' },
+            { label: '3{球目|きゅうめ}', p: pat(0, 0, 0), note: '💥 {打|う}たれる' },
           ]}
         />
       );
@@ -55,11 +56,21 @@ function Figure({ kind }: { kind: NonNullable<TutorialPage['figure']> }) {
       return (
         <Rows
           rows={[
-            { label: '1{球目|きゅうめ}', p: pat(0, 0), note: 'ふつう' },
-            { label: '2{球目|きゅうめ}', p: pat(1, 1), note: '{長|なが}く{止|と}まって、ためる' },
-            { label: '3{球目|きゅうめ}', p: pat(0, -1), note: 'ためずにすぐ！' },
+            { label: '1{球目|きゅうめ}', p: pat(0, 0, 0), note: 'ふつう' },
+            { label: '2{球目|きゅうめ}', p: pat(1, 0, 1), note: '{長|なが}く{止|と}まって、ためる' },
+            { label: '3{球目|きゅうめ}', p: pat(0, -1, -1), note: 'クイックですぐ！' },
           ]}
         />
+      );
+    case 'zone':
+      return (
+        <div className="tut-figure tut-zone">
+          <ZonePicker spot={{ type: 'slugger', hand: 'R', order: 4 }} aim={{ x: 1, y: 4 }} disabled />
+          <ZoneLegend />
+          <p className="small-text muted">
+            <R>{ZONE.note}</R>
+          </p>
+        </div>
       );
     case 'cost':
       return (

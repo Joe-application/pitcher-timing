@@ -1,9 +1,10 @@
 // 打席・イニングの進行。1球ごとに「状態＋投球 → 新しい状態＋記録」を返す純粋関数。
 // 乱数は球ごとのシードから決まった順番で引くので、同じシードと入力なら同じ結果になる（もしもリプレイ用）。
 
-import type { Bases, BatterType, PitchRecord, PitchResult, RuleWarning, RunnerEvent, Seconds, TimingPattern } from '../types';
-import { initBatter, resetBatter, streakWith, swingChance, swingResult, swingTiming, updateBatter, type BatterState } from './batter';
-import { PITCH, RULES, RUNNER } from './constants';
+import type { Bases, BatterSpot, Cell, PitchRecord, PitchResult, RuleWarning, RunnerEvent, Seconds, TimingPattern, ZoneKind } from '../types';
+import { gradeOf, initBatter, resetBatter, streakWith, swingChance, swingResult, swingTiming, updateBatter, type BatterState } from './batter';
+import { LOCATION, PITCH, RULES, RUNNER } from './constants';
+import { actualCell, contactMod, isStrike, NO_MOD, sameCell, swingAdjust, timingShift, zoneKind } from './location';
 import { createRng, hashSeed } from './rng';
 import { initRunner, pickoffOutChance, resetRunner, stealSuccessChance, stealTryChance, updateRunner, type RunnerState } from './runner';
 import { checkRules, shiftKinds, type Segments } from './timing';
@@ -12,7 +13,7 @@ import { checkRules, shiftKinds, type Segments } from './timing';
 export interface GameConfig {
   stageId: string;
   /** 打順。最後まで行ったら先頭に戻る */
-  lineup: BatterType[];
+  lineup: BatterSpot[];
   /** 投手の「ふつう」 */
   base: Segments;
   /** ステージのシード。球ごとのシードはここから作る */
@@ -23,7 +24,7 @@ export interface GameConfig {
   outsToClear: number;
   /** これを超えて点を取られたら失敗 */
   maxRuns: number;
-  /** ストライクが入る割合 */
+  /** ねらったマスに行く確率（ねらいを指定しないで投げたときは、ストライクが入る割合） */
   strikeRate?: number;
   balkCheck?: boolean;
   minSetStop?: Seconds;
@@ -47,6 +48,8 @@ export interface GameState {
   pitchCount: number;
   /** いまの打席で投げた球（牽制をのぞく） */
   atBatPitches: number;
+  /** いまの打席で、直前の球が行ったマス */
+  lastCell: Cell | null;
 }
 
 export interface StartSituation {
@@ -59,7 +62,7 @@ export interface StartSituation {
 export function initGame(cfg: GameConfig, start: StartSituation = {}): GameState {
   return {
     batterIndex: 0,
-    batter: initBatter(cfg.lineup[0], cfg.base),
+    batter: initBatter(cfg.lineup[0].type, cfg.base),
     balls: start.balls ?? 0,
     strikes: start.strikes ?? 0,
     outs: start.outs ?? 0,
@@ -69,6 +72,7 @@ export function initGame(cfg: GameConfig, start: StartSituation = {}): GameState
     pickoffsInRow: 0,
     pitchCount: 0,
     atBatPitches: 0,
+    lastCell: null,
   };
 }
 
@@ -131,13 +135,24 @@ function walk(bases: Bases): { bases: Bases; runs: number } {
   return { bases: next, runs };
 }
 
+/** 人が打者をするとき（対戦モード）の入力 */
+export interface HumanSwing {
+  swung: boolean;
+  /** タイミングのずれ（ミリ秒）。正なら早すぎ、負なら振りおくれ */
+  errorMs: number;
+}
+
 export interface PitchOutcome {
   state: GameState;
   record: PitchRecord;
 }
 
-/** 1球投げる（牽制・プレートを外すも含む） */
-export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern): PitchOutcome {
+/**
+ * 1球投げる（牽制・プレートを外すも含む）。
+ * @param aim ねらうマス。指定しなければ、コースの影響なしで、ストライクかどうかだけを乱数で決める
+ * @param human 人が打者のとき、振ったかどうかとタイミング。指定すると打者モデルの代わりに使う
+ */
+export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern, aim?: Cell, human?: HumanSwing): PitchOutcome {
   const seed = pitchSeed(cfg, s);
   const rng = createRng(seed);
   // 乱数は使う・使わないに関係なく、いつも同じ順番で全部引く（もしもリプレイで結果を比べられるように）
@@ -150,6 +165,9 @@ export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern): Pit
     jump: rng.normal(),
     steal: rng.next(),
     pickoff: rng.next(),
+    // コントロール（あとから足したので最後に引く）
+    control: rng.next(),
+    scatter: rng.next(),
   };
 
   const base = cfg.base;
@@ -168,6 +186,11 @@ export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern): Pit
   let runner = s.runner;
   let pickoffsInRow = s.pickoffsInRow;
   let atBatPitches = s.atBatPitches;
+  let lastCell = s.lastCell;
+  const spot = cfg.lineup[s.batterIndex];
+  let location: Cell | undefined;
+  let zone: ZoneKind | undefined;
+  let sameSpot: boolean | undefined;
   let result: PitchResult;
   let timingErrorMs = 0;
   let timing: PitchRecord['timing'];
@@ -225,17 +248,37 @@ export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern): Pit
     // ---- 投球 ----
     pickoffsInRow = 0;
     atBatPitches++;
-    let strikeRate = cfg.strikeRate ?? PITCH.STRIKE_RATE;
-    if (p.s3 < PITCH.NO_HOLD_S3) strikeRate -= PITCH.NO_HOLD_PENALTY;
-    if (p.s1 < PITCH.RUSHED_S1) strikeRate -= PITCH.RUSHED_S1_PENALTY;
-    const inZone = d.zone < strikeRate;
+    // 急いだ投げ方はコントロールが乱れる
+    let control = cfg.strikeRate ?? (aim ? LOCATION.ON_TARGET : PITCH.STRIKE_RATE);
+    if (p.s2 < PITCH.QUICK_S2) control -= PITCH.QUICK_S2_PENALTY;
+    if (p.s3 < PITCH.NO_HOLD_S3) control -= PITCH.NO_HOLD_PENALTY;
+    if (p.s1 < PITCH.RUSHED_S1) control -= PITCH.RUSHED_S1_PENALTY;
+
+    let inZone: boolean;
+    let mod = NO_MOD;
+    let shift = 0;
+    let zoneSwing = 0;
+    if (aim) {
+      location = actualCell(aim, control, d.control, d.scatter);
+      inZone = isStrike(location);
+      zone = zoneKind(spot, location);
+      sameSpot = sameCell(lastCell, location);
+      mod = contactMod(zone, location, sameSpot);
+      shift = timingShift(location, spot.hand);
+      zoneSwing = swingAdjust(zone);
+      lastCell = location;
+    } else {
+      inZone = d.zone < control;
+    }
 
     const t = swingTiming(batter, p, d.timing);
-    timingErrorMs = Math.round(t.error * 1000);
-    timing = t.grade;
-    swung = d.swing < swingChance(batter.type, inZone, balls, strikes, t.grade);
+    const error = human ? human.errorMs / 1000 : t.error + shift;
+    const grade = gradeOf(error);
+    timingErrorMs = Math.round(error * 1000);
+    timing = grade;
+    swung = human ? human.swung : d.swing < swingChance(batter.type, inZone, balls, strikes, grade, zoneSwing);
 
-    if (swung) result = swingResult(batter.type, t.grade, inZone, p.s3, d.contact);
+    if (swung) result = swingResult(batter.type, grade, inZone, p.s3, d.contact, mod);
     else result = inZone ? 'take' : 'ball';
 
     // 走者のスタート（打球が前に飛ばなかったときだけ盗塁になる）
@@ -299,7 +342,13 @@ export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern): Pit
   const record: PitchRecord = {
     stageId: cfg.stageId,
     batterType: s.batter.type,
+    batterHand: spot.hand,
+    batterOrder: spot.order,
     pattern: p,
+    aim: location ? aim : undefined,
+    location,
+    zone,
+    sameSpot,
     batterExpectation: { s1: s.batter.expS1, liftToRelease: s.batter.expLtr },
     timingErrorMs,
     result,
@@ -319,7 +368,8 @@ export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern): Pit
 
   if (atBatEnd) {
     batterIndex = (s.batterIndex + 1) % cfg.lineup.length;
-    batter = initBatter(cfg.lineup[batterIndex], base);
+    batter = initBatter(cfg.lineup[batterIndex].type, base);
+    lastCell = null;
     balls = 0;
     strikes = 0;
     atBatPitches = 0;
@@ -339,6 +389,7 @@ export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern): Pit
       pickoffsInRow,
       pitchCount: s.pitchCount + 1,
       atBatPitches,
+      lastCell,
     },
   };
 }

@@ -1,20 +1,23 @@
 // モード1：勝負画面。1球ずつ「間」を決めて投げ、打席が終わったら振り返りを見る。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { audioContext, sfx, unlockAudio } from '../../audio/cues';
-import { BATTER, BUTTONS, CARD, describeDiff, managerComment, preHint, RESULT, RUNNER_EVENT, SEGMENT, STEAL_COMMENT, timingText, WARNING } from '../../game/messages';
+import { audioContext, schedulePitchSounds, sfx, unlockAudio, type PlateSound } from '../../audio/cues';
+import { BATTER, BUTTONS, describeDiff, managerComment, preHint, RESULT, RUNNER_EVENT, STEAL_COMMENT, timingText, WARNING, ZONE } from '../../game/messages';
 import { addGameStats, earnedBadges, rankIndex, rankPoints, REALTIME_RANK, summarize } from '../../game/progression';
 import { stageById, type StageDef } from '../../game/stages';
 import { initGame, isBatterOut, isCleared, isOver, pickoffTarget, runnerOn, throwPitch, type GameConfig, type GameState, type PitchOutcome } from '../../sim/atBat';
-import { CARD_LEVELS, RULES, type CardKey, type CardLevel } from '../../sim/constants';
+import { PITCH, RULES, type CardLevel } from '../../sim/constants';
 import { randomSeed } from '../../sim/rng';
 import { baselineOf, fromCards, NORMAL_CARDS, type Cards } from '../../sim/timing';
 import { MAX_PATTERNS } from '../../storage/profile';
-import type { PitchEvent, PitchRecord, TimingPattern } from '../../types';
+import type { BatterSpot, Cell, PitchEvent, PitchRecord, TimingPattern } from '../../types';
+import { Board } from '../components/Board';
+import { CardPicker } from '../components/CardPicker';
 import { BatterCard, Diamond, Dots, Manager } from '../components/Hud';
 import { R } from '../components/Ruby';
 import { Scene, type PitchClock } from '../components/Scene';
 import { ExpectationChart, Timeline } from '../components/Timeline';
+import { ZoneLegend, ZonePicker } from '../components/ZonePicker';
 import { useApp, withRank } from '../state';
 
 interface Entry {
@@ -29,35 +32,32 @@ const LEAD_MS = 450;
 /** リアルタイム方式で、足を上げたまま止めていられる上限（秒） */
 const MAX_HOLD = 1.5;
 
-function playResultSound(r: PitchRecord) {
-  if (r.result === 'swingMiss') sfx.whiff();
-  else if (r.result === 'take' || r.result === 'ball') sfx.mitt();
-  else if (r.result === 'hit' || r.result === 'extraBase' || r.result === 'homeRun') sfx.bat();
-  else if (r.result === 'groundOut' || r.result === 'flyOut' || r.result === 'foul') sfx.weak();
-  else if (r.result === 'balk') sfx.buzzer();
-  else if (r.result === 'pickoffOut') sfx.good();
+/** ボールがホームベースに届いた瞬間の音 */
+function plateSound(r: PitchRecord): PlateSound {
+  if (!r.swung || r.result === 'swingMiss') return 'mitt';
+  if (r.result === 'homeRun') return 'homeRun';
+  if (r.result === 'extraBase') return 'pingBig';
+  if (r.result === 'hit') return 'ping';
+  // アウト・ファウルでも、タイミングが合っていればいい音がする
+  return r.timing === 'just' ? 'ping' : 'dull';
 }
 
-function CardPicker({ seg, value, onChange, disabled, max = 2 }: { seg: CardKey; value: CardLevel; onChange: (v: CardLevel) => void; disabled?: boolean; /** 選べるいちばん長い段階 */ max?: CardLevel }) {
-  const levels = CARD_LEVELS[seg].filter((lv) => lv <= max);
-  return (
-    <div className={`card-row ${seg}`}>
-      <span className="card-row-name">{SEGMENT[seg].name}</span>
-      <div className="card-choices">
-        {levels.map((lv) => (
-          <button key={lv} className={`choice${value === lv ? ' on' : ''}`} disabled={disabled} onClick={() => onChange(lv)} aria-pressed={value === lv}>
-            {CARD[seg][lv]}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
+/** 動きが終わったあとの音（観客の反応など）。combo = 続けて打ち取った人数 */
+function playAfterSound(r: PitchRecord, combo: number) {
+  if (r.result === 'balk') sfx.buzzer();
+  else if (r.runsScored > 0) sfx.run();
+  else if (r.result === 'pickoffOut' || r.runnerEvent === 'caughtStealing') sfx.out(2);
+  else if (isBatterOut(r)) {
+    if (r.result === 'swingMiss' || r.result === 'take') sfx.strikeout();
+    else sfx.out(combo);
+  } else if (r.runnerEvent === 'steal') sfx.steal();
 }
 
 /** もしもリプレイ：最後の1球を別のパターンで投げていたら */
 function WhatIf({ cfg, entry, stage }: { cfg: GameConfig; entry: Entry; stage: StageDef }) {
   const [cards, setCards] = useState<Cards | null>(null);
-  const alt = useMemo(() => (cards ? throwPitch(cfg, entry.before, fromCards(cfg.base, cards)).record : null), [cards, cfg, entry]);
+  // コースは、実際に投げたときと同じところをねらう
+  const alt = useMemo(() => (cards ? throwPitch(cfg, entry.before, fromCards(cfg.base, cards), entry.record.aim).record : null), [cards, cfg, entry]);
   const current = cards ?? NORMAL_CARDS;
   const set = (k: keyof Cards) => (v: CardLevel) => setCards({ ...current, [k]: v });
   return (
@@ -69,6 +69,7 @@ function WhatIf({ cfg, entry, stage }: { cfg: GameConfig; entry: Entry; stage: S
         <R>{'{同|おな}じ{運|うん}（{乱数|らんすう}）のまま、{間|ま}だけを{変|か}えて{計算|けいさん}しなおす。'}</R>
       </p>
       <CardPicker seg="s1" value={current.s1} onChange={set('s1')} />
+      <CardPicker seg="s2" value={current.s2} onChange={set('s2')} />
       <CardPicker seg="s3" value={current.s3} onChange={set('s3')} max={stage.cards.s3Long ? 2 : 1} />
       {alt && (
         <div className={`banner ${RESULT[alt.result].tone}`}>
@@ -114,12 +115,16 @@ export function BattleScreen() {
   const [clock, setClock] = useState<PitchClock | null>(null);
   const [pending, setPending] = useState<{ before: GameState; outcome: PitchOutcome } | null>(null);
   const [saved, setSaved] = useState(false);
+  /** ねらうマス。打席ごとに自分で選ぶ */
+  const [aim, setAim] = useState<Cell | null>(null);
 
   const realtimeOpen = stage.cards.realtime || profile.rank >= REALTIME_RANK;
   const [realtime, setRealtime] = useState(false);
   /** リアルタイム方式の進み具合 */
   const [rt, setRt] = useState<'idle' | 'set' | 'lifted'>('idle');
   const rtTimer = useRef(0);
+  /** 予約した音の取り消し */
+  const soundCancel = useRef<() => void>(() => {});
 
   const last = history[history.length - 1]?.record ?? null;
   const shown = phase === 'anim' ? null : last;
@@ -141,13 +146,29 @@ export function BattleScreen() {
 
   /** 結果を計算して、アニメーションを始める */
   const launch = useCallback(
-    (p: TimingPattern, c: PitchClock) => {
-      const outcome = throwPitch(cfg, game, p);
+    (p: TimingPattern, c: PitchClock, fromSet = true) => {
+      const outcome = throwPitch(cfg, game, p, p.event ? undefined : (aim ?? undefined));
+      // 動きに合わせて音を予約する。fromSet = false は、足上げまでの音をもう鳴らしてある（リアルタイム方式）
+      const r = outcome.record;
+      const early = fromSet ? { setAt: c.setAt, liftAt: c.liftAt ?? undefined } : {};
+      const thrown = !c.event && r.result !== 'balk' && !r.warnings.includes('delay');
+      soundCancel.current();
+      if (c.event === 'pickoff' && c.eventAt != null) {
+        soundCancel.current = schedulePitchSounds({ ...early, forwardAt: c.eventAt, releaseAt: c.eventAt + 150, plateAt: c.eventAt + 600 }, 'mitt');
+      } else if (thrown && c.liftAt != null && c.forwardAt != null) {
+        const releaseAt = c.forwardAt + c.s4 * 1000;
+        const plateAt = releaseAt + PITCH.BALL_FLIGHT * 1000;
+        const hold = fromSet ? { topAt: c.liftAt + c.s2 * 1000, holdUntil: c.forwardAt } : {};
+        const swingAt = r.swung ? plateAt - r.timingErrorMs : undefined;
+        soundCancel.current = schedulePitchSounds({ ...early, ...hold, forwardAt: c.forwardAt, releaseAt, plateAt, swingAt }, plateSound(r));
+      } else {
+        soundCancel.current = schedulePitchSounds(early);
+      }
       setPending({ before: game, outcome });
       setClock(c);
       setPhase('anim');
     },
-    [cfg, game],
+    [cfg, game, aim],
   );
 
   const throwCards = (event: PitchEvent | null = null) => {
@@ -165,11 +186,22 @@ export function BattleScreen() {
     setClock(null);
     setGame(outcome.state);
     setHistory((h) => [...h, { before, record: outcome.record }]);
-    playResultSound(outcome.record);
+    // 続けて打ち取った人数（この球を含む）
+    let combo = isBatterOut(outcome.record) ? 1 : 0;
+    for (let i = history.length - 1; combo > 0 && i >= 0; i--) {
+      const r = history[i].record;
+      if (!r.atBatEnd) continue;
+      if (!isBatterOut(r)) break;
+      combo++;
+    }
+    playAfterSound(outcome.record, combo);
+    const ended = outcome.record.atBatEnd || isOver(cfg, outcome.state);
+    // 同じリズムが続いていたら、次の球の前に知らせる
+    if (!ended && outcome.state.batter.streak >= 2) window.setTimeout(() => sfx.warn(), 700);
     setRt('idle');
     setSaved(false);
-    setPhase(outcome.record.atBatEnd || isOver(cfg, outcome.state) ? 'atBatEnd' : 'choose');
-  }, [pending, cfg]);
+    setPhase(ended ? 'atBatEnd' : 'choose');
+  }, [pending, cfg, history]);
 
   // ---- リアルタイム方式 ----
 
@@ -177,7 +209,7 @@ export function BattleScreen() {
     id: `rt${Date.now()}`,
     name: '',
     s1: Math.round(s1 * 1000) / 1000,
-    s2: base.s2,
+    s2: fromCards(base, cards).s2,
     s3: Math.round(Math.max(0, s3) * 1000) / 1000,
     s4: base.s4,
     event,
@@ -187,9 +219,9 @@ export function BattleScreen() {
   const rtSet = () => {
     unlockAudio();
     const setAt = performance.now() + 600;
-    setClock({ setAt, liftAt: null, s2: base.s2, forwardAt: null, s4: base.s4 });
+    setClock({ setAt, liftAt: null, s2: fromCards(base, cards).s2, forwardAt: null, s4: base.s4 });
     setRt('set');
-    window.setTimeout(() => sfx.tap(), 600);
+    soundCancel.current = schedulePitchSounds({ setAt });
     // 長く止まりすぎたら、審判に止められる（遅延）
     window.clearTimeout(rtTimer.current);
     rtTimer.current = window.setTimeout(() => {
@@ -205,6 +237,9 @@ export function BattleScreen() {
     window.clearTimeout(rtTimer.current);
     setClock({ ...clock, liftAt });
     setRt('lifted');
+    // 足が動く音と、ためている間の心臓の音（はなした時点で取り消す）
+    const topAt = liftAt + clock.s2 * 1000;
+    soundCancel.current = schedulePitchSounds({ liftAt, topAt, holdUntil: topAt + MAX_HOLD * 1000 });
     // 足を上げたまま止めすぎたら、自動で前へ
     rtTimer.current = window.setTimeout(() => rtUpRef.current(performance.now()), (clock.s2 + MAX_HOLD) * 1000);
   };
@@ -212,12 +247,12 @@ export function BattleScreen() {
   const rtUp = (t: number) => {
     if (rt !== 'lifted' || !clock || clock.liftAt == null) return;
     window.clearTimeout(rtTimer.current);
-    // 足を上げる速さはいつも同じ。上がりきる前に指をはなしたら、上がりきってすぐ前へ（ため 0）
+    // 足を上げる速さは先に選んだカードで決まる。上がりきる前に指をはなしたら、上がりきってすぐ前へ（ため 0）
     const forwardAt = Math.max(t, clock.liftAt + clock.s2 * 1000);
     const s1 = (clock.liftAt - clock.setAt) / 1000;
     const s3 = (forwardAt - clock.liftAt) / 1000 - clock.s2;
     setRt('idle');
-    launch(rtPattern(s1, s3), { ...clock, forwardAt });
+    launch(rtPattern(s1, s3), { ...clock, forwardAt }, false);
   };
   const rtUpRef = useRef(rtUp);
   rtUpRef.current = rtUp;
@@ -227,15 +262,24 @@ export function BattleScreen() {
     window.clearTimeout(rtTimer.current);
     const now = Math.max(performance.now(), clock.setAt);
     setRt('idle');
-    launch(rtPattern((now - clock.setAt) / 1000, 0, event), { ...clock, event, eventAt: now });
+    launch(rtPattern((now - clock.setAt) / 1000, 0, event), { ...clock, event, eventAt: now }, false);
   };
 
-  useEffect(() => () => window.clearTimeout(rtTimer.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(rtTimer.current);
+      soundCancel.current();
+    },
+    [],
+  );
 
   // ---- 打席・ステージの終わり ----
 
   const nextBatter = () => {
+    if (game.batter.type === 'boss') sfx.boss();
     setCards(NORMAL_CARDS);
+    // 打席が変わったら、ねらうところを選びなおす
+    if (last?.atBatEnd) setAim(null);
     setPhase('choose');
   };
 
@@ -251,6 +295,7 @@ export function BattleScreen() {
     next = withRank({ ...next, badges });
     if (cleared) sfx.fanfare();
     else sfx.bad();
+    if (newBadges.length > 0 || next.rank > profile.rank) window.setTimeout(() => sfx.sparkle(), 1400);
     dispatch({
       type: 'finishStage',
       profile: next,
@@ -287,9 +332,11 @@ export function BattleScreen() {
   const leadText = lead > 0 ? `${lead}{点|てん}リード` : lead === 0 ? '{同点|どうてん}' : `${-lead}{点|てん}ビハインド`;
   // 点数が決まっている場面（リベンジ）は「4-4 同点」のように出す。取られた点は相手に足す
   const scoreText = sit.score ? `${sit.score[0]}-${sit.score[1] + game.runs} ${leadText}` : leadText;
-  const batterNo = history.filter((e) => e.record.atBatEnd).length + (phase === 'atBatEnd' && last?.atBatEnd ? 0 : 1);
   // 打席が終わった直後は、次の打者ではなく、いま終わった打者を見せる
-  const shownBatter = phase === 'atBatEnd' && last ? last.batterType : game.batter.type;
+  const shownSpot: BatterSpot =
+    phase === 'atBatEnd' && last
+      ? (cfg.lineup.find((x) => x.order === last.batterOrder) ?? { type: last.batterType, hand: last.batterHand, order: last.batterOrder })
+      : cfg.lineup[game.batterIndex];
   const shownCount = phase === 'atBatEnd' && last ? last.after : { balls: game.balls, strikes: game.strikes };
   const preview = fromCards(base, cards);
 
@@ -324,6 +371,11 @@ export function BattleScreen() {
               <b>
                 <R>{RESULT[shown.result].text}</R>
               </b>
+              {shown.location && (
+                <span>
+                  <R>{`${ZONE.name(shown.location, shown.batterHand)}${shown.zone === 'hot' ? '（{得意|とくい}）' : shown.zone === 'cold' ? '（{苦手|にがて}）' : ''}`}</R>
+                </span>
+              )}
               {shown.swung && (
                 <span>
                   <R>{timingText(shown)}</R>
@@ -346,6 +398,17 @@ export function BattleScreen() {
               <R>{WARNING[w]}</R>
             </p>
           ))}
+          {phase !== 'intro' && (
+            <Board
+              inning={sit.inning}
+              score={scoreText}
+              balls={shownCount.balls}
+              strikes={shownCount.strikes}
+              outs={phase === 'atBatEnd' && last ? last.after.outs : game.outs}
+              bases={game.bases}
+              spot={shownSpot}
+            />
+          )}
         </div>
 
         <div className="battle-side">
@@ -361,7 +424,7 @@ export function BattleScreen() {
               <div className="lineup">
                 {stage.lineup.map((t, i) => (
                   <span key={i} className="pill">
-                    {BATTER[t].icon} <R>{BATTER[t].name}</R>
+                    <R>{`${t.order}{番|ばん}`}</R> {BATTER[t.type].icon} <R>{BATTER[t.type].name}</R>
                   </span>
                 ))}
               </div>
@@ -371,6 +434,7 @@ export function BattleScreen() {
                   onClick={() => {
                     unlockAudio();
                     audioContext();
+                    if (game.batter.type === 'boss') sfx.boss();
                     setPhase('choose');
                   }}
                 >
@@ -381,11 +445,20 @@ export function BattleScreen() {
           )}
 
           {(phase === 'choose' || phase === 'anim') && (
-            <>
-              <BatterCard type={shownBatter} no={batterNo} />
-              <p className="hint">
-                <R>{shown?.runnerEvent === 'steal' ? STEAL_COMMENT : preHint(game.batter.streak, game.batter.type)}</R>
-              </p>
+            <div className="controls-phase">
+              <BatterCard spot={shownSpot} />
+              <div className="at-bat-row">
+                <ZonePicker spot={cfg.lineup[game.batterIndex]} aim={aim} onAim={(c) => (sfx.select(), setAim(c))} last={game.lastCell} disabled={phase === 'anim' || rt !== 'idle'} />
+                <div>
+                  <p className="hint">
+                    <R>{shown?.runnerEvent === 'steal' ? STEAL_COMMENT : preHint(game.batter.streak, game.batter.type, game.balls, game.strikes)}</R>
+                  </p>
+                  <p className={`aim-text${aim ? '' : ' need'}`}>
+                    <R>{aim ? `🎯 ${ZONE.name(aim, cfg.lineup[game.batterIndex].hand)}` : `👆 ${ZONE.pick}`}</R>
+                  </p>
+                  <ZoneLegend />
+                </div>
+              </div>
 
               {realtimeOpen && (
                 <div className="seg-toggle">
@@ -401,22 +474,23 @@ export function BattleScreen() {
               {!realtime ? (
                 <div className="controls">
                   <CardPicker seg="s1" value={cards.s1} onChange={(v) => setCards({ ...cards, s1: v })} disabled={phase === 'anim'} />
+                  <CardPicker seg="s2" value={cards.s2} onChange={(v) => setCards({ ...cards, s2: v })} disabled={phase === 'anim'} />
                   <CardPicker seg="s3" value={cards.s3} onChange={(v) => setCards({ ...cards, s3: v })} disabled={phase === 'anim'} max={stage.cards.s3Long ? 2 : 1} />
                   <p className="muted small-text center">
                     <R>{describeDiff(preview, base)}</R>
                   </p>
-                  <div className="row center-row wrap">
+                  <div className="row center-row wrap pitch-actions">
                     {stage.cards.events && (
                       <>
-                        <button disabled={phase === 'anim' || !canPickoff} onClick={() => throwCards('pickoff')}>
+                        <button className="small" disabled={phase === 'anim' || !canPickoff} onClick={() => throwCards('pickoff')}>
                           <R>{BUTTONS.pickoff}</R>
                         </button>
-                        <button disabled={phase === 'anim'} onClick={() => throwCards('stepOff')}>
+                        <button className="small" disabled={phase === 'anim'} onClick={() => throwCards('stepOff')}>
                           <R>{BUTTONS.stepOff}</R>
                         </button>
                       </>
                     )}
-                    <button className="primary big" disabled={phase === 'anim'} onClick={() => throwCards()}>
+                    <button className="primary big" disabled={phase === 'anim' || !aim} onClick={() => throwCards()}>
                       <R>{BUTTONS.pitch}</R>
                     </button>
                   </div>
@@ -431,7 +505,7 @@ export function BattleScreen() {
                         <R>{'マイパターン：'}</R>
                       </span>
                       {profile.patterns.slice(0, 6).map((p) => (
-                        <button key={p.id} className="small" disabled={phase === 'anim'} onClick={() => throwSaved(p)}>
+                        <button key={p.id} className="small" disabled={phase === 'anim' || !aim} onClick={() => throwSaved(p)}>
                           {p.name}
                         </button>
                       ))}
@@ -440,8 +514,9 @@ export function BattleScreen() {
                 </div>
               ) : (
                 <div className="controls">
+                  <CardPicker seg="s2" value={cards.s2} onChange={(v) => setCards({ ...cards, s2: v })} disabled={phase === 'anim' || rt !== 'idle'} />
                   {rt === 'idle' ? (
-                    <button className="primary big rt-button" disabled={phase === 'anim'} onClick={rtSet}>
+                    <button className="primary big rt-button" disabled={phase === 'anim' || !aim} onClick={rtSet}>
                       <R>{BUTTONS.set}</R>
                     </button>
                   ) : (
@@ -474,16 +549,16 @@ export function BattleScreen() {
                     </div>
                   )}
                   <p className="muted small-text center">
-                    <R>{`「セット！」→ {好|す}きなだけ{止|と}まる → ボタンに{指|ゆび}を{置|お}くと{足|あし}が{上|あ}がる → {押|お}している{間|あいだ}は「ため」→ はなすと{投|な}げる。${anyRunner ? 'ランナーがいる。すぐ{動|うご}くとボーク！' : ''}`}</R>
+                    <R>{`「セット！」→ {好|す}きなだけ{止|と}まる → ボタンに{指|ゆび}を{置|お}くと{足|あし}が{上|あ}がる（{速|はや}さは{上|うえ}で{選|えら}ぶ）→ {押|お}している{間|あいだ}は「ため」→ はなすと{投|な}げる。${anyRunner ? 'ランナーがいる。すぐ{動|うご}くとボーク！' : ''}`}</R>
                   </p>
                 </div>
               )}
-            </>
+            </div>
           )}
 
           {phase === 'atBatEnd' && last && (
             <div className="review">
-              <BatterCard type={shownBatter} no={batterNo} />
+              <BatterCard spot={shownSpot} />
               <Manager>{last.runnerEvent === 'steal' && !last.atBatEnd ? STEAL_COMMENT : managerComment(atBat)}</Manager>
               <div className="card">
                 <h3>

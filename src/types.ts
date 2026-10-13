@@ -36,6 +36,36 @@ export interface Baseline {
 
 export type BatterType = 'straight' | 'hasty' | 'patient' | 'slugger' | 'boss';
 
+/** 右打ち・左打ち */
+export type Hand = 'R' | 'L';
+
+/** 投げるコースと高さのマス（5×5）。投手から見て x = 0 が左（一塁側）〜 4 が右（三塁側）、y = 0 が高め 〜 4 が低め。
+ * 内側の 3×3（1〜3）がストライクゾーン */
+export interface Cell {
+  x: number;
+  y: number;
+}
+
+/** 打者から見たコース（内角・真ん中・外角）と高さ */
+export type ZoneCol = 'in' | 'mid' | 'out';
+export type ZoneRow = 'high' | 'mid' | 'low';
+export type ZoneSpot = `${ZoneCol}-${ZoneRow}`;
+/** その打者にとって、得意・苦手・ふつうのコースか。ball = ボールゾーン */
+export type ZoneKind = 'hot' | 'cold' | 'normal' | 'ball';
+
+/** 打順の1人 */
+export interface BatterSpot {
+  type: BatterType;
+  hand: Hand;
+  /** 何番バッターか */
+  order: number;
+  /** 得意・苦手コース（打者から見た向き）。書かなければタイプごとの決まりを使う */
+  hot?: ZoneSpot[];
+  cold?: ZoneSpot[];
+  /** 身長（cm）。打者カードに出す */
+  height?: number;
+}
+
 /** スイングのタイミングのずれ方 */
 export type TimingGrade = 'just' | 'slight' | 'off' | 'broken';
 
@@ -61,12 +91,22 @@ export type PitchResult =
 export type RunnerEvent = 'steal' | 'caughtStealing';
 
 /** ずらしの種類（振り返り・バッジ・星の判定に使う） */
-export type ShiftKind = 's1Short' | 's1Long' | 's3Quick' | 's3Hold' | 's3Long' | 'pickoff' | 'stepOff';
+export type ShiftKind = 's1Short' | 's1Long' | 's2Quick' | 's2Slow' | 's3Quick' | 's3Hold' | 's3Long' | 'pickoff' | 'stepOff';
 
 export interface PitchRecord {
   stageId: string;
   batterType: BatterType;
+  /** 右打ち・左打ちと打順 */
+  batterHand: Hand;
+  batterOrder: number;
   pattern: TimingPattern;
+  /** ねらったマスと、実際に行ったマス（牽制などは無し） */
+  aim?: Cell;
+  location?: Cell;
+  /** 実際に行ったマスが、打者の得意・苦手のどれだったか */
+  zone?: ZoneKind;
+  /** 前の球と同じマスだった */
+  sameSpot?: boolean;
   /** 投げる前に打者が予想していた間 */
   batterExpectation: { s1: Seconds; liftToRelease: Seconds };
   /** 正なら打者が早すぎ（泳ぐ）、負なら差し込まれる。牽制などスイングがない球は 0 */
@@ -121,7 +161,7 @@ export interface Settings {
   cueSound: 'beep' | 'wood' | 'drum';
   /** モード2の1回の練習の上限 */
   practiceLimit: number;
-  /** ストライクが入る割合（コーチ向け） */
+  /** ねらったところに投げられる割合（コーチ向け）。名前は古い版のまま */
   strikeRate: number;
 }
 

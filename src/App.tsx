@@ -11,6 +11,7 @@ import { SettingsScreen } from './ui/screens/Settings';
 import { StageResultScreen } from './ui/screens/StageResult';
 import { StagesScreen } from './ui/screens/Stages';
 import { TutorialScreen } from './ui/screens/Tutorial';
+import { VersusScreen } from './ui/screens/Versus';
 import { VideoMeasureScreen } from './ui/screens/VideoMeasure';
 
 function Screens() {
@@ -40,6 +41,8 @@ function Screens() {
       return painOk ? <VideoMeasureScreen /> : <PracticeScreen />;
     case 'patterns':
       return <PatternsScreen />;
+    case 'versus':
+      return <VersusScreen />;
     case 'records':
       return <RecordsScreen />;
     case 'settings':

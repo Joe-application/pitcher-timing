@@ -41,18 +41,17 @@ export const RULES = {
 };
 
 // ---- カード（§4.2 A）。「ふつう」からの差で表す ----
-// 【調整】仕様では「あしあげ」の速さ（S2）もカードで変えられたが、足を上げる速さを変えても
-// 打者は「足が上がって止まったところ」からタイミングを取りなおせるので、ずらしにならない。
-// そこで S2 はどのパターンも「ふつう」と同じ長さに固定し、足を上げて止まっている時間（S3：ため）で調整する。
+// ずらしの要素は3つ：セットで止まる時間（S1）、足を上げる速さ（S2）、足を上げて止める時間（S3：ため）。
 
-/** カードの段階。-1 = 短い、0 = ふつう、1 = 長い、2 = もっと長い（「ため」だけ） */
+/** カードの段階。-1 = 短い・速い、0 = ふつう、1 = 長い・遅い、2 = もっと長い（「ため」だけ） */
 export type CardLevel = -1 | 0 | 1 | 2;
 /** カードで変えられる区間 */
-export type CardKey = 's1' | 's3';
+export type CardKey = 's1' | 's2' | 's3';
 
 /** 各区間で選べる段階 */
 export const CARD_LEVELS: Record<CardKey, CardLevel[]> = {
   s1: [-1, 0, 1],
+  s2: [-1, 0, 1],
   s3: [-1, 0, 1, 2],
 };
 
@@ -60,13 +59,17 @@ export const CARD_LEVELS: Record<CardKey, CardLevel[]> = {
 export const CARD_DELTA: Record<CardKey, Partial<Record<CardLevel, Seconds>>> = {
   /** とまる：みじかく(0.6) / ふつう(1.2) / ながく(2.5) */
   s1: { [-1]: -0.6, 0: 0, 1: 1.3 },
-  /** ため：すぐ(0.0) / ふつう(0.12) / ためる(0.45) / ながくためる(0.80) */
+  /** あしあげ：クイック(0.2) / ふつう(0.42) / ゆっくり(0.7) */
+  s2: { [-1]: -0.22, 0: 0, 1: 0.28 },
+  /** ため：すぐ(0.0) / ふつう(0.12) / ためる(0.45) / ながくためる(0.80)。
+   * 【調整】仕様の例は「ためる 0.4秒」の1段階だが、「ため」を細かく使い分けられるよう2段階にした */
   s3: { [-1]: -0.12, 0: 0, 1: 0.33, 2: 0.68 },
 };
 
 /** カードで作る値の下限・上限（「ふつう」が人によって違っても極端にならないように） */
 export const CARD_LIMITS: Record<CardKey, [Seconds, Seconds]> = {
   s1: [0.6, 3.5],
+  s2: [0.18, 1.0],
   s3: [0, 1.0],
 };
 
@@ -81,6 +84,7 @@ export const SAME_TOLERANCE: Record<SegmentKey, Seconds> = {
 /** 「ふつう」からこれ以上はなれていたら、その区間をずらしたと数える */
 export const SHIFT_THRESHOLD = {
   s1: 0.4,
+  s2: 0.1,
   s3: 0.08,
   /** 「ため」がふつうよりこれ以上長ければ「ながくためる」 */
   s3Long: 0.5,
@@ -98,9 +102,9 @@ export interface BatterParams {
   /** 【追加】見てから合わせられる幅（秒）。予想とのずれがこの幅におさまれば、動きを見て合わせてしまう。
    * 強い打者ほど広い。この幅を超えたぶんだけがタイミングのずれになる */
   adjust: Seconds;
-  /** 【追加】予想より遅い球（ため）に対するずれの倍率。1より大きいと「泳ぎやすい」 */
+  /** 【追加】予想より遅い球（ため・ゆっくり）に対するずれの倍率。1より大きいと「泳ぎやすい」 */
   earlyGain: number;
-  /** 【追加】予想より速い球（ためずにすぐ）に対するずれの倍率。1より大きいと「差し込まれやすい」 */
+  /** 【追加】予想より速い球（クイック・すぐ）に対するずれの倍率。1より大きいと「差し込まれやすい」 */
   lateGain: number;
   /** 長いセットで力むか */
   tenseOnLongSet: boolean;
@@ -113,12 +117,12 @@ export const BATTERS: Record<BatterType, BatterParams> = {
   straight: { alpha: 0.15, power: 0.45, sigma: 0.05, adjust: 0.03, earlyGain: 1, lateGain: 1, tenseOnLongSet: true, eagerness: 0 },
   /** せっかち：早く振りがち。「ため」に特に弱い */
   hasty: { alpha: 0.35, power: 0.25, sigma: 0.045, adjust: 0.06, earlyGain: 1.7, lateGain: 0.7, tenseOnLongSet: true, eagerness: 0.12 },
-  /** じっくり型：長いセットでは力まない。「すぐ」に弱い */
+  /** じっくり型：長いセットでは力まない。クイック・「すぐ」に弱い */
   patient: { alpha: 0.35, power: 0.5, sigma: 0.04, adjust: 0.06, earlyGain: 0.7, lateGain: 1.7, tenseOnLongSet: false, eagerness: -0.12 },
   /** 強打者：すぐ合わせてくる。1区間だけのずらしは見て合わせるので、2つ以上まぜる必要がある */
   slugger: { alpha: 0.6, power: 0.8, sigma: 0.035, adjust: 0.1, earlyGain: 1, lateGain: 1, tenseOnLongSet: true, eagerness: 0 },
-  /** ボス「あの日の強打者」：直前の球にぴったり合わせる。長いセットでも動じない。直前から大きく（0.35秒より多く）変えないと崩れない */
-  boss: { alpha: 1.0, power: 1.0, sigma: 0.022, adjust: 0.35, earlyGain: 1, lateGain: 1, tenseOnLongSet: false, eagerness: 0.05 },
+  /** ボス「あの日の強打者」：直前の球にぴったり合わせる。長いセットでも動じない。直前から大きく（0.38秒より多く）変えないと崩れない */
+  boss: { alpha: 1.0, power: 1.0, sigma: 0.022, adjust: 0.38, earlyGain: 1, lateGain: 1, tenseOnLongSet: false, eagerness: 0.05 },
 };
 
 export const BATTER_MODEL = {
@@ -130,6 +134,14 @@ export const BATTER_MODEL = {
   S1_SHORT_MARGIN: 0.5,
   /** 準備が遅れたときに差し込まれる量 */
   S1_SHORT_LATE_SHIFT: 0.09,
+  /** 【追加】足を上げて止まると、打者はそこからタイミングを取りなおせる。
+   * 「ため」がこの長さを超えると取りなおしが始まり… */
+  RESYNC_START: 0.1,
+  /** …この長さで、取りなおしが最大になる */
+  RESYNC_FULL: 0.4,
+  /** 取りなおしが最大のとき、足を上げる速さ（S2）のずれがどれだけ消えるか（0 = 消えない、1 = 全部消える）。
+   * つまり「クイック」「ゆっくり」は、ためずに投げるときによく効き、長くためるとあまり効かない */
+  RESYNC_MAX: 0.7,
   /** 同じパターンがこの球数続いたら読まれる */
   SAME_STREAK_FOR_BONUS: 3,
   /** 読まれたときに α に足す値 */
@@ -152,9 +164,12 @@ export const TIMING_BANDS = {
 export const PITCH = {
   /** ストライクが入る割合（設定で変更可） */
   STRIKE_RATE: 0.7,
+  /** S2 がこれ未満（クイックすぎ）だとコントロールが乱れる */
+  QUICK_S2: 0.25,
+  QUICK_S2_PENALTY: 0.07,
   /** S3 がこれ未満（ためずにすぐ投げる）だとコントロールが乱れる */
   NO_HOLD_S3: 0.04,
-  NO_HOLD_PENALTY: 0.1,
+  NO_HOLD_PENALTY: 0.07,
   /** S1 がこれ未満（急ぎすぎ）だとコントロールが乱れる */
   RUSHED_S1: 0.7,
   RUSHED_S1_PENALTY: 0.1,
@@ -166,6 +181,30 @@ export const PITCH = {
   HOLD_LOSS_LONG_HIT_BONUS: 0.3,
   /** リリースからホームベースまでの時間（アニメーション用。16m を 約85km/h） */
   BALL_FLIGHT: 0.62,
+};
+
+// ---- コースと高さ（【追加】仕様ではコントロールは乱数だったが、自分でねらう場所を選べるようにした） ----
+export const LOCATION = {
+  /** ねらったマスにそのまま行く確率（設定で変更可）。クイック・すぐ・急いだセットではここから下がる */
+  ON_TARGET: 0.7,
+  /** 外れたときに、2マスぶん大きく外れる割合（のこりは隣のマス） */
+  FAR_MISS: 0.15,
+  /** 得意コースに行ったとき、ヒットになる確率の倍率 */
+  HOT_HIT: 1.25,
+  /** 苦手コースに行ったとき、ヒットになる確率の倍率 */
+  COLD_HIT: 0.8,
+  /** 前の球と同じマスに続けて行ったとき（目が慣れる）の、ヒットの倍率 */
+  REPEAT_HIT: 1.25,
+  /** 高めは当たると長打になりやすい */
+  HIGH_LONG: 1.2,
+  /** 低めは長打になりにくい */
+  LOW_LONG: 0.85,
+  /** 低めはゴロが増え、高めはフライが増える（ゴロの割合に足す値） */
+  LOW_GROUND: 0.2,
+  /** 得意コースは振りやすく、苦手コースは手が出にくい（ストライクを振る確率に足す値） */
+  HOT_SWING: 0.1,
+  /** 内角は差し込まれ、外角は泳ぎやすい（タイミングのずれに足す秒数） */
+  SIDE_TIMING_SHIFT: 0.01,
 };
 
 /** 振る確率。カウントで変わる */
@@ -233,7 +272,7 @@ export const RUNNER = {
   goodJumpWindow: 0.12,
   /** 最低の成功率 */
   successMin: 0.08,
-  /** 足上げ〜リリースが「ふつう」より1秒短いと、成功率がこれだけ下がる（ためずにすぐ投げると盗塁対策になる） */
+  /** 足上げ〜リリースが「ふつう」より1秒短いと、成功率がこれだけ下がる（クイックや、ためずにすぐ投げるのは盗塁対策になる） */
   successPerDeliverySecond: 0.6,
   /** 三盗は二盗よりむずかしい（成功率に掛ける） */
   stealThirdFactor: 0.85,

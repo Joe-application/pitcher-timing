@@ -18,6 +18,7 @@ export type Screen =
   | 'challenge'
   | 'video'
   | 'patterns'
+  | 'versus'
   | 'records'
   | 'settings';
 

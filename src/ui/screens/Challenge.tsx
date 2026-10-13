@@ -27,7 +27,8 @@ export function ChallengeScreen() {
 
   const onDone = (measured: Measured) => {
     const score = scoreChallenge(target, measured, base);
-    if (score.score >= 80) sfx.good();
+    if (score.score >= 100) sfx.sparkle();
+    else if (score.score >= 80) sfx.good();
     setResult({ measured, score });
     dispatch({ type: 'rep', profile: addPractice(p, { mode: 'challenge', target, measured, score: score.score, at: new Date().toISOString() }) });
   };

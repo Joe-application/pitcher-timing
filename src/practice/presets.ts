@@ -14,14 +14,16 @@ export interface PresetDef {
 }
 
 export const PRESETS: PresetDef[] = [
-  { id: 'normal', name: 'ふつう', say: 'ふつう', cards: { s1: 0, s3: 0 }, hint: 'いつものリズム。これが{基準|きじゅん}' },
-  { id: 'long', name: 'ながセット', say: 'ながセット', cards: { s1: 1, s3: 0 }, hint: 'セットで{長|なが}く{止|と}まってから、ふつうに{投|な}げる' },
-  { id: 'short', name: 'みじかセット', say: 'みじかセット', cards: { s1: -1, s3: 0 }, hint: 'ピタッと{止|と}まったら、すぐ{足|あし}を{上|あ}げる' },
-  { id: 'quick', name: 'すぐ', say: 'すぐ', cards: { s1: 0, s3: -1 }, hint: '{足|あし}を{上|あ}げたら、{止|と}まらずにそのまま{前|まえ}へ' },
-  { id: 'hold', name: 'ためため', say: 'ためため', cards: { s1: 0, s3: 1 }, hint: '{足|あし}を{上|あ}げたところで、ひと{呼吸|こきゅう}ためる' },
-  { id: 'longHold', name: 'ながため', say: 'ながため', cards: { s1: 0, s3: 2 }, hint: '{足|あし}を{上|あ}げたところで、じっくりためる' },
-  { id: 'longQuick', name: 'ながすぐ', say: 'ながすぐ', cards: { s1: 1, s3: -1 }, hint: 'セットで{長|なが}く{止|と}まってから、ためずにササッと{投|な}げる' },
-  { id: 'shortHold', name: 'みじかため', say: 'みじかため', cards: { s1: -1, s3: 1 }, hint: 'すぐ{足|あし}を{上|あ}げて、{上|うえ}でためる' },
+  { id: 'normal', name: 'ふつう', say: 'ふつう', cards: { s1: 0, s2: 0, s3: 0 }, hint: 'いつものリズム。これが{基準|きじゅん}' },
+  { id: 'long', name: 'ながセット', say: 'ながセット', cards: { s1: 1, s2: 0, s3: 0 }, hint: 'セットで{長|なが}く{止|と}まってから、ふつうに{投|な}げる' },
+  { id: 'short', name: 'みじかセット', say: 'みじかセット', cards: { s1: -1, s2: 0, s3: 0 }, hint: 'ピタッと{止|と}まったら、すぐ{足|あし}を{上|あ}げる' },
+  { id: 'quick', name: 'クイック', say: 'クイック', cards: { s1: 0, s2: -1, s3: -1 }, hint: '{足|あし}を{小|ちい}さくすばやく{上|あ}げて、{止|と}まらずに{前|まえ}へ' },
+  { id: 'slow', name: 'ゆっくり', say: 'ゆっくり', cards: { s1: 0, s2: 1, s3: 0 }, hint: '{足|あし}をゆっくり{上|あ}げる' },
+  { id: 'hold', name: 'ためため', say: 'ためため', cards: { s1: 0, s2: 0, s3: 1 }, hint: '{足|あし}を{上|あ}げたところで、ひと{呼吸|こきゅう}ためる' },
+  { id: 'longHold', name: 'ながため', say: 'ながため', cards: { s1: 0, s2: 0, s3: 2 }, hint: '{足|あし}を{上|あ}げたところで、じっくりためる' },
+  { id: 'longQuick', name: 'ながクイック', say: 'ながクイック', cards: { s1: 1, s2: -1, s3: -1 }, hint: 'セットで{長|なが}く{止|と}まってから、ササッと{投|な}げる' },
+  { id: 'shortHold', name: 'みじかため', say: 'みじかため', cards: { s1: -1, s2: 0, s3: 1 }, hint: 'すぐ{足|あし}を{上|あ}げて、{上|うえ}でためる' },
+  { id: 'quickHold', name: 'クイックため', say: 'クイックため', cards: { s1: 0, s2: -1, s3: 1 }, hint: 'すばやく{足|あし}を{上|あ}げて、{上|うえ}でピタッとためる' },
 ];
 
 export function presetPattern(def: PresetDef, base: Segments): TimingPattern {
@@ -30,9 +32,9 @@ export function presetPattern(def: PresetDef, base: Segments): TimingPattern {
 
 /** 組み立て練習：3球1セットの順番 */
 export const SEQUENCES: { name: string; ids: string[] }[] = [
-  { name: 'ふつう → ながセット → すぐ', ids: ['normal', 'long', 'quick'] },
-  { name: 'すぐ → ためため → ながため', ids: ['quick', 'hold', 'longHold'] },
-  { name: 'ながすぐ → ふつう → みじかため', ids: ['longQuick', 'normal', 'shortHold'] },
+  { name: 'ふつう → ながセット → クイック', ids: ['normal', 'long', 'quick'] },
+  { name: 'クイック → ためため → ながため', ids: ['quick', 'hold', 'longHold'] },
+  { name: 'ながクイック → ゆっくり → クイックため', ids: ['longQuick', 'slow', 'quickHold'] },
 ];
 
 export const presetById = (id: string) => PRESETS.find((p) => p.id === id) ?? PRESETS[0];

@@ -1,4 +1,4 @@
-import { BATTER, BUTTONS, KIND, stageComment } from '../../game/messages';
+import { BATTER, BUTTONS, KIND, spotText, stageComment } from '../../game/messages';
 import { BADGES, RANKS, splitAtBats } from '../../game/progression';
 import { isStageOpen, stageById, STAGES } from '../../game/stages';
 import { Manager, Stars } from '../components/Hud';
@@ -103,8 +103,7 @@ export function StageResultScreen() {
         {atBats.map((a, i) => (
           <div key={i} className="ab-block">
             <h3>
-              {i + 1}
-              <R>{`{人目|にんめ}　${BATTER[a[0].batterType].icon} ${BATTER[a[0].batterType].name}`}</R>
+              <R>{`${spotText({ order: a[0].batterOrder, hand: a[0].batterHand })}　${BATTER[a[0].batterType].icon} ${BATTER[a[0].batterType].name}`}</R>
             </h3>
             <Timeline records={a} />
           </div>

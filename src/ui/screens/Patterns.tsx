@@ -13,6 +13,7 @@ import { useApp } from '../state';
 /** スライダーの範囲（秒） */
 const RANGE = {
   s1: [RULES.MIN_SET_STOP, CARD_LIMITS.s1[1]],
+  s2: CARD_LIMITS.s2,
   s3: CARD_LIMITS.s3,
 } as const;
 
@@ -20,8 +21,8 @@ export function PatternsScreen() {
   const { state, dispatch } = useApp();
   const p = state.profile!;
   const base = baselineOf(p.baseline);
-  const [draft, setDraft] = useState({ name: '', s1: base.s1, s3: base.s3 });
-  const draftPattern: TimingPattern = { id: 'draft', name: draft.name, s1: draft.s1, s2: base.s2, s3: draft.s3, s4: base.s4, event: null, createdFrom: 'custom' };
+  const [draft, setDraft] = useState({ name: '', s1: base.s1, s2: base.s2, s3: base.s3 });
+  const draftPattern: TimingPattern = { id: 'draft', name: draft.name, s1: draft.s1, s2: draft.s2, s3: draft.s3, s4: base.s4, event: null, createdFrom: 'custom' };
   const warnings = checkRules(draftPattern, { runnerOn: true, minSetStop: p.settings.minSetStop, maxTopHold: p.settings.maxTopHold, topHoldWarning: p.settings.topHoldWarning });
   const full = p.patterns.length >= MAX_PATTERNS;
   const scale = Math.max(3.6, ...p.patterns.map(totalTime), totalTime(draftPattern)) * 1.05;
@@ -79,7 +80,7 @@ export function PatternsScreen() {
         <h2>
           <R>{'{新|あたら}しいパターンを{作|つく}る'}</R>
         </h2>
-        {(['s1', 's3'] as const).map((k) => (
+        {(['s1', 's2', 's3'] as const).map((k) => (
           <label key={k} className={`slider ${k}`}>
             <span>
               {SEGMENT[k].name} <b>{draft[k].toFixed(2)}</b>
@@ -89,7 +90,7 @@ export function PatternsScreen() {
           </label>
         ))}
         <p className="muted small-text">
-          <R>{'{足|あし}を{上|あ}げる{速|はや}さ（あしあげ）は、いつも{同|おな}じ。{変|か}えるのは「とまる」と「ため」。'}</R>
+          <R>{'とまる＝セットの{時間|じかん}、あしあげ＝{足|あし}を{上|あ}げる{速|はや}さ（{短|みじか}いほど{速|はや}い）、ため＝{足|あし}を{上|あ}げて{止|と}める{時間|じかん}。'}</R>
         </p>
         <PatternBar p={draftPattern} scale={scale} showSeconds />
         <p className="small-text">
@@ -103,7 +104,7 @@ export function PatternsScreen() {
             </p>
           ))}
         <div className="row wrap">
-          <input value={draft.name} maxLength={12} placeholder="名前（例：ためため、ながすぐ）" onChange={(e) => setDraft({ ...draft, name: e.target.value })} aria-label="新しいパターンの名前" />
+          <input value={draft.name} maxLength={12} placeholder="名前（例：ためため、ササッと）" onChange={(e) => setDraft({ ...draft, name: e.target.value })} aria-label="新しいパターンの名前" />
           <button className="primary" disabled={full} onClick={add}>
             <R>{'{保存|ほぞん}する'}</R>
           </button>

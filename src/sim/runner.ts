@@ -32,7 +32,7 @@ export function stealSuccessChance(r: RunnerState, p: Segments, base: Segments, 
   // 走者のスタートのずれ（予想より早く足が上がると出遅れ、遅いと体が止まる）
   const miss = Math.abs(p.s1 - r.expS1 + z * RUNNER.jumpSigma);
   let s = RUNNER.successGoodJump - RUNNER.successDropPerSecond * Math.max(0, miss - RUNNER.goodJumpWindow);
-  // ためずにすぐ投げると、そのぶん走者は間に合わない（ためると走られやすい）
+  // クイックや、ためずにすぐ投げると、そのぶん走者は間に合わない（ゆっくり・ためると走られやすい）
   s += RUNNER.successPerDeliverySecond * (liftToRelease(p) - liftToRelease(base));
   if (toThird) s *= RUNNER.stealThirdFactor;
   return Math.min(0.97, Math.max(RUNNER.successMin, s));

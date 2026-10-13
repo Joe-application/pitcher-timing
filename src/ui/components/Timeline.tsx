@@ -1,6 +1,6 @@
 // 振り返り用の図。区間の長さを色つきのバーで並べて、どこを変えたかが一目でわかるようにする。
 
-import { RESULT, RESULT_SHORT, SEGMENT } from '../../game/messages';
+import { RESULT, RESULT_SHORT, SEGMENT, ZONE } from '../../game/messages';
 import { isBatterOut } from '../../sim/atBat';
 import { changedSegments, liftToRelease, totalTime, type Segments } from '../../sim/timing';
 import type { PitchRecord, SegmentKey } from '../../types';
@@ -112,6 +112,11 @@ export function Timeline({ records }: { records: PitchRecord[] }) {
                   {r.timing === 'just' ? '◎' : ''}
                   {r.timingErrorMs > 0 ? '+' : ''}
                   {r.timingErrorMs}ms
+                </span>
+              )}
+              {r.location && (
+                <span className={`tl-ms tl-zone ${r.zone ?? ''}`}>
+                  <R>{ZONE.name(r.location, r.batterHand)}</R>
                 </span>
               )}
               {r.runnerEvent && <span className="tl-ms">{r.runnerEvent === 'steal' ? '🏃盗塁' : '🏃アウト'}</span>}

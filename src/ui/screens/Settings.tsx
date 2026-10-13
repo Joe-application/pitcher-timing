@@ -126,7 +126,7 @@ export function SettingsScreen() {
         </summary>
         <label className="slider">
           <span>
-            <R>{'ストライクが{入|はい}る{割合|わりあい}（モード1）'}</R> <b>{Math.round(s.strikeRate * 100)}</b>%
+            <R>{'ねらったマスに{投|な}げられる{割合|わりあい}（モード1）'}</R> <b>{Math.round(s.strikeRate * 100)}</b>%
           </span>
           <input type="range" min={0.4} max={0.9} step={0.05} value={s.strikeRate} onChange={(e) => set({ strikeRate: Number(e.target.value) })} />
         </label>

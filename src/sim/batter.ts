@@ -3,6 +3,7 @@
 
 import type { BatterType, PitchResult, Seconds, TimingGrade } from '../types';
 import { BATTER_MODEL, BATTERS, CONTACT, PITCH, SWING, TIMING_BANDS } from './constants';
+import { NO_MOD, type ContactMod } from './location';
 import { liftToRelease, sameRhythm, type Segments } from './timing';
 
 export interface BatterState {
@@ -11,6 +12,8 @@ export interface BatterState {
   expS1: Seconds;
   /** 予想している「足上げ開始→リリース」の長さ */
   expLtr: Seconds;
+  /** そのうち、予想している「あしあげ」の長さ */
+  expS2: Seconds;
   /** 同じリズムが続いている球数 */
   streak: number;
   /** 直前の投球 */
@@ -19,7 +22,7 @@ export interface BatterState {
 
 /** 打席に入るとき。ベンチで見ていたので、投手の「ふつう」を予想している */
 export function initBatter(type: BatterType, base: Segments): BatterState {
-  return { type, expS1: base.s1, expLtr: liftToRelease(base), streak: 0, last: null };
+  return { type, expS1: base.s1, expLtr: liftToRelease(base), expS2: base.s2, streak: 0, last: null };
 }
 
 /** この球を投げたら、同じリズムが何球続くことになるか */
@@ -46,13 +49,25 @@ export function gradeOf(error: Seconds): TimingGrade {
 }
 
 /**
+ * 足を上げる速さ（S2）のずれが、どれだけ打者に残るか（0〜1）。
+ * 足を上げて止まると、打者はそこからタイミングを取りなおせるので、ためるほど小さくなる。
+ */
+export function liftWeight(s3: Seconds): number {
+  const m = BATTER_MODEL;
+  const k = Math.min(1, Math.max(0, (s3 - m.RESYNC_START) / (m.RESYNC_FULL - m.RESYNC_START)));
+  return 1 - m.RESYNC_MAX * k;
+}
+
+/**
  * スイングのタイミング誤差。
  * @param z 標準正規分布の乱数（打者固有のばらつき用）
  */
 export function swingTiming(b: BatterState, p: Segments, z: number): SwingTiming {
   const prm = BATTERS[b.type];
-  // 主な誤差：実際の長さ − 予想の長さ
-  let e = liftToRelease(p) - b.expLtr;
+  // 主な誤差：実際の長さ − 予想の長さ。「足を上げる速さ」のずれと「上げてから投げるまで」のずれに分ける
+  const liftDiff = p.s2 - b.expS2;
+  const topDiff = p.s3 + p.s4 - (b.expLtr - b.expS2);
+  let e = topDiff + liftDiff * liftWeight(p.s3);
   e *= e > 0 ? prm.earlyGain : prm.lateGain;
   // 短いセットで準備が遅れると、そのぶん差し込まれる
   const rushed = p.s1 < b.expS1 - BATTER_MODEL.S1_SHORT_MARGIN;
@@ -82,6 +97,7 @@ export function updateBatter(b: BatterState, p: Segments): BatterState {
     type: b.type,
     expS1: b.expS1 + alpha * (p.s1 - b.expS1),
     expLtr: b.expLtr + alpha * (liftToRelease(p) - b.expLtr),
+    expS2: b.expS2 + alpha * (p.s2 - b.expS2),
     streak,
     last: { s1: p.s1, s2: p.s2, s3: p.s3, s4: p.s4 },
   };
@@ -93,18 +109,19 @@ export function resetBatter(b: BatterState, base: Segments, amount: number): Bat
     ...b,
     expS1: b.expS1 + amount * (base.s1 - b.expS1),
     expLtr: b.expLtr + amount * (liftToRelease(base) - b.expLtr),
+    expS2: b.expS2 + amount * (base.s2 - b.expS2),
     streak: 0,
     last: null,
   };
 }
 
 /** 振る確率 */
-export function swingChance(type: BatterType, inZone: boolean, balls: number, strikes: number, grade: TimingGrade): number {
+export function swingChance(type: BatterType, inZone: boolean, balls: number, strikes: number, grade: TimingGrade, zoneAdjust = 0): number {
   const eager = BATTERS[type].eagerness;
   if (inZone) {
     if (strikes >= 2) return SWING.strikeTwoStrikes;
     if (balls === 3 && strikes === 0) return SWING.strikeThreeOh;
-    return Math.min(0.98, Math.max(0.05, SWING.strike + eager));
+    return Math.min(0.98, Math.max(0.05, SWING.strike + eager + zoneAdjust));
   }
   let p = strikes >= 2 ? SWING.ballTwoStrikes : SWING.ball;
   // タイミングを崩されると、体が止まらずボール球にも手が出る
@@ -119,9 +136,10 @@ export function holdLoss(s3: Seconds): number {
 }
 
 /** ジャストで当たったときの長打（二塁打以上）の確率 */
-export function longHitChance(type: BatterType, s3: Seconds): number {
+export function longHitChance(type: BatterType, s3: Seconds, mod: ContactMod = NO_MOD): number {
   const c = CONTACT.just;
-  return Math.min(0.9, c.longBase + c.longPerPower * BATTERS[type].power + PITCH.HOLD_LOSS_LONG_HIT_BONUS * holdLoss(s3));
+  const base = c.longBase + c.longPerPower * BATTERS[type].power + PITCH.HOLD_LOSS_LONG_HIT_BONUS * holdLoss(s3);
+  return Math.min(0.9, base * mod.hit * mod.long);
 }
 
 const DOWNGRADE: Record<TimingGrade, TimingGrade> = { just: 'slight', slight: 'off', off: 'broken', broken: 'broken' };
@@ -129,8 +147,10 @@ const DOWNGRADE: Record<TimingGrade, TimingGrade> = { just: 'slight', slight: 'o
 /**
  * スイングの結果。
  * @param u 0〜1 の一様乱数
+ * @param mod コース・高さの影響
  */
-export function swingResult(type: BatterType, grade: TimingGrade, inZone: boolean, s3: Seconds, u: number): PitchResult {
+export function swingResult(type: BatterType, grade: TimingGrade, inZone: boolean, s3: Seconds, u: number, mod: ContactMod = NO_MOD): PitchResult {
+  const ground = (share: number) => Math.min(0.95, Math.max(0.05, share + mod.ground));
   const power = BATTERS[type].power;
   const g = !inZone && CONTACT.chaseDowngrade ? DOWNGRADE[grade] : grade;
   // u を「区切り」で順番に切っていく
@@ -139,28 +159,28 @@ export function swingResult(type: BatterType, grade: TimingGrade, inZone: boolea
 
   if (g === 'just') {
     const c = CONTACT.just;
-    const long = longHitChance(type, s3);
+    const long = longHitChance(type, s3, mod);
     const hr = long * (c.hrBase + c.hrPerPower * power);
     if (hit(hr)) return 'homeRun';
     if (hit(long - hr)) return 'extraBase';
-    if (hit(c.single)) return 'hit';
+    if (hit(Math.min(c.single * mod.hit, 0.97 - long))) return 'hit';
     const rest = 1 - acc;
-    return hit(rest * c.groundShare) ? 'groundOut' : 'flyOut';
+    return hit(rest * ground(c.groundShare)) ? 'groundOut' : 'flyOut';
   }
   if (g === 'slight') {
     const c = CONTACT.slight;
     if (hit(c.foul)) return 'foul';
-    if (hit(c.hitBase + c.hitPerPower * power)) return 'hit';
+    if (hit((c.hitBase + c.hitPerPower * power) * mod.hit)) return 'hit';
     const rest = 1 - acc;
-    return hit(rest * c.groundShare) ? 'groundOut' : 'flyOut';
+    return hit(rest * ground(c.groundShare)) ? 'groundOut' : 'flyOut';
   }
   if (g === 'off') {
     const c = CONTACT.off;
     if (hit(c.swingMiss)) return 'swingMiss';
     if (hit(c.foul)) return 'foul';
-    if (hit(c.hit)) return 'hit';
+    if (hit(c.hit * mod.hit)) return 'hit';
     const rest = 1 - acc;
-    return hit(rest * c.groundShare) ? 'groundOut' : 'flyOut';
+    return hit(rest * ground(c.groundShare)) ? 'groundOut' : 'flyOut';
   }
   return 'swingMiss';
 }

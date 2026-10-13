@@ -1,7 +1,7 @@
 // カウント・塁・打者の表示
 
-import { BATTER } from '../../game/messages';
-import type { Bases, BatterType } from '../../types';
+import { BATTER, RATING, RATING_TEXT, spotText } from '../../game/messages';
+import type { Bases, BatterSpot } from '../../types';
 import { R } from './Ruby';
 
 export function Dots({ label, n, max, kind }: { label: string; n: number; max: number; kind: 'b' | 's' | 'o' }) {
@@ -29,16 +29,24 @@ export function Diamond({ bases }: { bases: Bases }) {
   );
 }
 
-export function BatterCard({ type, no }: { type: BatterType; no?: number }) {
-  const b = BATTER[type];
+export function BatterCard({ spot }: { spot: Pick<BatterSpot, 'type' | 'hand' | 'order' | 'height'> }) {
+  const b = BATTER[spot.type];
+  const rating = RATING[spot.type];
   return (
-    <div className={`batter-card ${type}`}>
+    <div className={`batter-card ${spot.type}`}>
       <span className="batter-icon">{b.icon}</span>
       <div>
         <b>
-          {no !== undefined && <span className="muted">{no}{'人目 '}</span>}
+          <span className="batter-order">
+            <R>{spotText(spot)}</R>
+            {spot.height ? `・${spot.height}cm` : ''}
+          </span>{' '}
           <R>{b.name}</R>
         </b>
+        <span className="batter-rating" aria-label={`打ちそう度 ${rating}`}>
+          <span className="rating-on">{'●'.repeat(rating)}</span>
+          <span className="rating-off">{'●'.repeat(5 - rating)}</span> <R>{RATING_TEXT[rating]}</R>
+        </span>
         <div className="small-text muted">
           <R>{b.desc}</R>
         </div>

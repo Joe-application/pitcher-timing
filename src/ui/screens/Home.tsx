@@ -91,6 +91,7 @@ const MENU: { screen: Screen; icon: string; title: string; desc: string; cls?: s
   { screen: 'tutorial', icon: '📖', title: '{入門|にゅうもん}', desc: 'なぜ「{間|ま}」を{変|か}えると{打|う}ち{取|と}れるのか' },
   { screen: 'stages', icon: '⚾', title: 'モード1：{打者|だしゃ}と{勝負|しょうぶ}', desc: '{間|ま}をあやつって{打者|だしゃ}を{打|う}ち{取|と}るゲーム', cls: 'mode-main' },
   { screen: 'practice', icon: '🏠', title: 'モード2：シャドー{練習|れんしゅう}', desc: '{音|おと}の{合図|あいず}に{合|あ}わせて、{体|からだ}で{間|ま}を{覚|おぼ}える', cls: 'mode-main' },
+  { screen: 'versus', icon: '🆚', title: '{対戦|たいせん}・バッティング', desc: '2{人|ふたり}で{投手|とうしゅ}と{打者|だしゃ}に{分|わ}かれて{勝負|しょうぶ}。{打|う}つ{方|ほう}はタイミングを{合|あ}わせる{練習|れんしゅう}', cls: 'mode-main' },
   { screen: 'patterns', icon: '📒', title: 'マイパターン{帳|ちょう}', desc: '{自分|じぶん}だけのずらし{方|かた}を{作|つく}って{名前|なまえ}をつける' },
   { screen: 'records', icon: '📊', title: '{記録|きろく}', desc: '{打|う}ち{取|と}り{率|りつ}・バッジ・{練習|れんしゅう}の{伸|の}び' },
   { screen: 'settings', icon: '⚙️', title: '{設定|せってい}', desc: '{音|おと}・ルールの{注意|ちゅうい}・{練習|れんしゅう}の{回数|かいすう}' },

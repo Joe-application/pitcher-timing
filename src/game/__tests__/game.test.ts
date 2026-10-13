@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { initGame, throwPitch } from '../../sim/atBat';
 import { DEFAULT_BASELINE } from '../../sim/constants';
+import { zoneKind } from '../../sim/location';
 import { fromCards } from '../../sim/timing';
 import { exportProfile, importProfile, newProfile, normalizeProfile } from '../../storage/profile';
 import type { PitchRecord } from '../../types';
@@ -16,7 +17,7 @@ function playStage(stageId: string, seed: number): { records: PitchRecord[]; out
   const records: PitchRecord[] = [];
   const levels = [-1, 0, 1] as const;
   for (let i = 0; i < 60 && s.outs < st.outsToClear && s.runs <= st.maxRuns; i++) {
-    const o = throwPitch(cfg, s, fromCards(BASE, { s1: levels[i % 3], s3: ([-1, 0, 1, 2] as const)[(i + 2) % 4] }));
+    const o = throwPitch(cfg, s, fromCards(BASE, { s1: levels[i % 3], s2: levels[(i * 2 + 1) % 3], s3: ([-1, 0, 1, 2] as const)[(i + 2) % 4] }));
     s = o.state;
     records.push(o.record);
   }
@@ -36,7 +37,12 @@ describe('ステージ', () => {
   it('リベンジは「最終回裏・1アウト・ランナー二塁・同点」から始まり、1点も取られてはいけない', () => {
     const st = STAGES.find((s) => s.id === 'revenge')!;
     expect(st.situation).toMatchObject({ outs: 1, bases: [false, true, false], scoreDiff: 0, score: [4, 4] });
-    expect(st.lineup[0]).toBe('boss');
+    expect(st.lineup[0]).toMatchObject({ type: 'boss', order: 3, hand: 'L', height: 165, hot: ['out-high', 'mid-mid', 'mid-low'] });
+    // 左打者の外角は、投手から見て右側。外角高めは得意、外角低めは苦手
+    expect(zoneKind(st.lineup[0], { x: 3, y: 1 })).toBe('hot');
+    expect(zoneKind(st.lineup[0], { x: 3, y: 3 })).toBe('cold');
+    expect(zoneKind(st.lineup[0], { x: 1, y: 1 })).toBe('cold');
+    expect(zoneKind(st.lineup[0], { x: 2, y: 3 })).toBe('hot');
     expect(st.maxRuns).toBe(0);
     expect(st.lineup.length).toBeGreaterThanOrEqual(2);
   });
@@ -83,10 +89,10 @@ describe('保存データ', () => {
     expect(p.settings.practiceLimit).toBe(30);
   });
 
-  it('古い版のデータ：ルール注意の長さを新しい最初の値にし、いまはないずらしの記録は捨てる', () => {
-    const p = normalizeProfile({ version: 1, settings: { maxTopHold: 0.3 }, stats: { kinds: { s2Quick: 4, s3Hold: 2 } } }, 'a');
+  it('古い版のデータ：ルール注意の長さを新しい最初の値にし、知らない名前のずらしの記録は捨てる', () => {
+    const p = normalizeProfile({ version: 1, settings: { maxTopHold: 0.3 }, stats: { kinds: { むかしのずらし: 4, s2Quick: 1, s3Hold: 2 } } }, 'a');
     expect(p.settings.maxTopHold).toBe(0.9);
-    expect(p.stats.kinds).toEqual({ s3Hold: 2 });
+    expect(p.stats.kinds).toEqual({ s2Quick: 1, s3Hold: 2 });
     // 自分で変えた値はそのまま
     expect(normalizeProfile({ version: 1, settings: { maxTopHold: 0.5 } }, 'a').settings.maxTopHold).toBe(0.5);
   });

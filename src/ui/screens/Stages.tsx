@@ -34,7 +34,7 @@ export function StagesScreen() {
                 <R>{`{相手|あいて}：${s.opponent}`}</R>
               </span>
               <span className="mode-desc">
-                {s.lineup.map((t) => BATTER[t].icon).join(' ')}
+                {s.lineup.map((t) => `${t.order}${BATTER[t.type].icon}`).join(' ')}
                 <R>{`　${s.situation.inning}・${s.situation.score ? `${s.situation.score[0]}-${s.situation.score[1]}・` : ''}${s.situation.outs}アウト${s.situation.bases.some(Boolean) ? '・ランナーあり' : ''}`}</R>
               </span>
               {!open && (

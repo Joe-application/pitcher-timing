@@ -141,66 +141,213 @@ export function previewCue(name: CueName, sound: Settings['cueSound']) {
   if (c) cue(c, name, c.currentTime + 0.02, sound);
 }
 
-// ---- 効果音（モード1） ----
+// ---- 効果音 ----
+// 野球の音に寄せて作る（金属バット・ミット・観客）。ふざけた音は入れない。
 
 function now(): [AudioContext, number] | null {
   const c = audioContext();
   return c ? [c, c.currentTime] : null;
 }
 
+/** 「シュッ」という風の音。帯域を動かしながら鳴らす */
+function sweep(c: AudioContext, at: number, dur: number, from: number, to: number, gain: number): Stoppable {
+  const len = Math.max(1, Math.floor(c.sampleRate * dur));
+  const buf = c.createBuffer(1, len, c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const src = c.createBufferSource();
+  src.buffer = buf;
+  const f = c.createBiquadFilter();
+  f.type = 'bandpass';
+  f.Q.value = 1.2;
+  f.frequency.setValueAtTime(from, at);
+  f.frequency.exponentialRampToValueAtTime(to, at + dur);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(gain, at + dur * 0.7);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  src.connect(f).connect(g).connect(master!);
+  src.start(at);
+  return src;
+}
+
+/** 観客のどよめき・歓声。ふくらんでからしぼむ */
+function crowd(c: AudioContext, at: number, dur: number, gain: number, freq = 1300): Stoppable {
+  const len = Math.max(1, Math.floor(c.sampleRate * dur));
+  const buf = c.createBuffer(1, len, c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) {
+    const k = i / len;
+    const env = Math.min(1, k / 0.18) * Math.pow(1 - k, 1.4);
+    // ゆらぎを入れて、人の声の集まりらしくする
+    d[i] = (Math.random() * 2 - 1) * env * (0.7 + 0.3 * Math.sin(i / 900) * Math.sin(i / 2300));
+  }
+  const src = c.createBufferSource();
+  src.buffer = buf;
+  const f = c.createBiquadFilter();
+  f.type = 'bandpass';
+  f.frequency.value = freq;
+  f.Q.value = 0.4;
+  const g = c.createGain();
+  g.gain.value = gain;
+  src.connect(f).connect(g).connect(master!);
+  src.start(at);
+  return src;
+}
+
+/** 金属バットの「カキーン」。strength 1 = 芯、0.5 = ふつうの当たり */
+function ping(c: AudioContext, at: number, strength: number): Stoppable[] {
+  return [
+    noise(c, at, 0.05, 0.9 * strength, 3000, 0.7),
+    tone(c, at, 2150, 0.55 * strength + 0.15, 0.32 * strength, 'sine'),
+    tone(c, at, 3230, 0.4 * strength + 0.1, 0.16 * strength, 'sine'),
+    tone(c, at, 4700, 0.25 * strength + 0.05, 0.07 * strength, 'sine'),
+  ];
+}
+
+/** 詰まった当たりの「ゴッ」 */
+function dull(c: AudioContext, at: number): Stoppable[] {
+  return [noise(c, at, 0.08, 0.8, 650, 1.2), tone(c, at, 820, 0.09, 0.2, 'triangle', 500)];
+}
+
+/** キャッチャーミットの「バシッ」 */
+function mitt(c: AudioContext, at: number, gain = 1): Stoppable[] {
+  return [noise(c, at, 0.09, 1.3 * gain, 1000, 1.1), tone(c, at, 170, 0.1, 0.5 * gain, 'sine', 90)];
+}
+
+/** 心臓の「ドクン」。足を上げて止まっている間の緊張 */
+function heartbeat(c: AudioContext, at: number): Stoppable[] {
+  return [tone(c, at, 62, 0.11, 0.55, 'sine', 45), tone(c, at + 0.14, 55, 0.13, 0.4, 'sine', 40)];
+}
+
+/** 低い太鼓の「ドン」 */
+function drum(c: AudioContext, at: number, gain = 0.8): Stoppable[] {
+  return [tone(c, at, 95, 0.4, gain, 'sine', 45), noise(c, at, 0.06, 0.35 * gain, 250, 0.8)];
+}
+
+/** 1球の中で鳴らす音の時刻表。時刻は performance.now() のミリ秒。ないものは鳴らさない */
+export interface PitchSoundTimes {
+  /** セット完了：グラブをたたく音 */
+  setAt?: number;
+  /** 足上げ開始：足が動く音 */
+  liftAt?: number;
+  /** 足が上がりきった時刻。ここから holdUntil まで、ためが長ければ心臓の音 */
+  topAt?: number;
+  holdUntil?: number;
+  /** 前へ動き出す：腕を振る風の音。releaseAt でボールが手をはなれる */
+  forwardAt?: number;
+  releaseAt?: number;
+  /** ボールがホームベースに届く */
+  plateAt?: number;
+  /** 打者が振る */
+  swingAt?: number;
+}
+
+/** ホームベースで鳴る音 */
+export type PlateSound = 'mitt' | 'ping' | 'pingBig' | 'homeRun' | 'dull' | 'none';
+
+/** 心臓の音を入れる「ため」の長さ（秒）と間隔 */
+const HEART_MIN_HOLD = 0.28;
+const HEART_EVERY = 0.42;
+
+/**
+ * 1球ぶんの音を、動きの時刻に合わせて予約する。返り値を呼ぶと、まだ鳴っていない音を取り消す。
+ * リアルタイム方式では、時刻が決まった部分から順に何回かに分けて呼ぶ。
+ */
+export function schedulePitchSounds(t: PitchSoundTimes, plate: PlateSound = 'none'): () => void {
+  const c = audioContext();
+  if (!c) return () => {};
+  const base = c.currentTime - performance.now() / 1000;
+  const at = (ms: number) => Math.max(c.currentTime, base + ms / 1000);
+  const nodes: Stoppable[] = [];
+  const add = (...n: Stoppable[]) => void nodes.push(...n);
+
+  if (t.setAt != null) add(noise(c, at(t.setAt), 0.05, 0.5, 500, 1.5), tone(c, at(t.setAt), 140, 0.06, 0.25, 'sine', 90));
+  if (t.liftAt != null) add(noise(c, at(t.liftAt), 0.07, 0.3, 1900, 0.9));
+  if (t.topAt != null && t.holdUntil != null && t.holdUntil - t.topAt >= HEART_MIN_HOLD * 1000) {
+    for (let ms = t.topAt + 60; ms < t.holdUntil - 120; ms += HEART_EVERY * 1000) add(...heartbeat(c, at(ms)));
+  }
+  if (t.forwardAt != null && t.releaseAt != null) {
+    const dur = Math.max(0.12, (t.releaseAt - t.forwardAt) / 1000);
+    add(sweep(c, at(t.forwardAt), dur, 500, 2600, 0.3));
+    add(noise(c, at(t.releaseAt), 0.06, 0.6, 4200, 0.8));
+  }
+  if (t.swingAt != null) add(sweep(c, at(t.swingAt) - 0.05, 0.16, 900, 3600, 0.45));
+  if (t.plateAt != null) {
+    const p = at(t.plateAt);
+    if (plate === 'mitt') add(...mitt(c, p));
+    else if (plate === 'dull') add(...dull(c, p));
+    else if (plate === 'ping') add(...ping(c, p, 0.6), crowd(c, p + 0.15, 1.2, 0.25));
+    else if (plate === 'pingBig') add(...ping(c, p, 0.85), crowd(c, p + 0.15, 1.8, 0.4));
+    else if (plate === 'homeRun') add(...ping(c, p, 1), crowd(c, p + 0.2, 3.2, 0.6), crowd(c, p + 0.5, 2.8, 0.4, 2600));
+  }
+  return () => {
+    for (const n of nodes) {
+      try {
+        n.stop();
+      } catch {
+        // もう止まっている
+      }
+    }
+  };
+}
+
+function play(fn: (c: AudioContext, t: number) => void) {
+  const a = now();
+  if (a) fn(a[0], a[1]);
+}
+
 export const sfx = {
-  /** いい当たり */
-  bat() {
-    const a = now();
-    if (!a) return;
-    noise(a[0], a[1], 0.12, 0.9, 2400, 0.8);
-    tone(a[0], a[1], 1400, 0.08, 0.3, 'triangle');
-  },
-  /** 詰まった当たり */
-  weak() {
-    const a = now();
-    if (!a) return;
-    noise(a[0], a[1], 0.09, 0.7, 700, 1.2);
-  },
-  /** ミットに入る */
-  mitt() {
-    const a = now();
-    if (!a) return;
-    noise(a[0], a[1], 0.07, 0.9, 900, 1.5);
-  },
-  /** 空振り */
-  whiff() {
-    const a = now();
-    if (!a) return;
-    noise(a[0], a[1], 0.18, 0.35, 3200, 0.6);
-  },
-  good() {
-    const a = now();
-    if (!a) return;
-    tone(a[0], a[1], 660, 0.12, 0.25, 'triangle');
-    tone(a[0], a[1] + 0.11, 880, 0.2, 0.25, 'triangle');
-  },
-  bad() {
-    const a = now();
-    if (!a) return;
-    tone(a[0], a[1], 300, 0.14, 0.3, 'sawtooth');
-    tone(a[0], a[1] + 0.13, 220, 0.35, 0.3, 'sawtooth', 160);
-  },
-  buzzer() {
-    const a = now();
-    if (!a) return;
-    tone(a[0], a[1], 140, 0.4, 0.3, 'square');
-  },
-  fanfare() {
-    const a = now();
-    if (!a) return;
-    [523, 659, 784, 1047].forEach((f, i) => tone(a[0], a[1] + i * 0.12, f, i === 3 ? 0.5 : 0.14, 0.22, 'triangle'));
-  },
-  tap() {
-    const a = now();
-    if (!a) return;
-    tone(a[0], a[1], 990, 0.04, 0.2, 'square');
-  },
+  /** カードを選ぶ */
+  select: () => play((c, t) => void tone(c, t, 520, 0.035, 0.12, 'triangle')),
+  tap: () => play((c, t) => void tone(c, t, 990, 0.04, 0.2, 'square')),
+  /** ミットに入る（牽制・モード2のリリースのあと） */
+  mitt: (delay = 0) => play((c, t) => void mitt(c, t + delay, 0.8)),
+  /** アウトを取った：拍手のようなざわめき。combo が大きいほど大きい */
+  out: (combo = 1) => play((c, t) => void crowd(c, t, 1.0 + 0.2 * Math.min(combo, 4), 0.18 + 0.07 * Math.min(combo, 4), 2200)),
+  /** 三振：ミットのあと、短い歓声 */
+  strikeout: () =>
+    play((c, t) => {
+      crowd(c, t, 1.6, 0.4, 2000);
+      tone(c, t, 784, 0.1, 0.16, 'triangle');
+      tone(c, t + 0.1, 1047, 0.22, 0.16, 'triangle');
+    }),
+  /** 点を取られた：低い太鼓 */
+  run: () => play((c, t) => void drum(c, t + 0.3, 0.7)),
+  /** 走られた */
+  steal: () => play((c, t) => void [0, 0.09, 0.18, 0.27].forEach((d) => noise(c, t + d, 0.04, 0.35, 380, 1.5))),
+  /** ボスが打席に入る：太鼓を2つ */
+  boss: () =>
+    play((c, t) => {
+      drum(c, t, 0.9);
+      drum(c, t + 0.45, 1.0);
+      crowd(c, t + 0.2, 1.8, 0.2, 500);
+    }),
+  /** 同じリズムが続いている注意 */
+  warn: () => play((c, t) => void [0, 0.14].forEach((d) => tone(c, t + d, 330, 0.09, 0.18, 'triangle'))),
+  good: () =>
+    play((c, t) => {
+      tone(c, t, 660, 0.12, 0.25, 'triangle');
+      tone(c, t + 0.11, 880, 0.2, 0.25, 'triangle');
+    }),
+  /** 満点・バッジ */
+  sparkle: () => play((c, t) => void [1319, 1568, 2093].forEach((f, i) => tone(c, t + i * 0.07, f, 0.35, 0.14, 'sine'))),
+  bad: () =>
+    play((c, t) => {
+      tone(c, t, 300, 0.14, 0.3, 'sawtooth');
+      tone(c, t + 0.13, 220, 0.35, 0.3, 'sawtooth', 160);
+    }),
+  /** ボーク・反則 */
+  buzzer: () => play((c, t) => void tone(c, t, 140, 0.4, 0.3, 'square')),
+  /** 休憩の合図：審判の笛のような音 */
+  whistle: () => play((c, t) => void [0, 0.28].forEach((d) => tone(c, t + d, 2350, 0.2, 0.2, 'sine', 2250))),
+  /** ステージクリア */
+  fanfare: () =>
+    play((c, t) => {
+      [523, 659, 784, 1047].forEach((f, i) => tone(c, t + i * 0.12, f, i === 3 ? 0.6 : 0.14, 0.22, 'triangle'));
+      [262, 330, 392].forEach((f) => tone(c, t + 0.36, f, 0.7, 0.1, 'triangle'));
+      crowd(c, t + 0.3, 2.6, 0.45);
+    }),
 };
 
 // ---- 読み上げ（「セット」やパターン名）。時刻の正確さがいらないところだけに使う ----

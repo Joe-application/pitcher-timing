@@ -34,7 +34,7 @@ describe('計測', () => {
 
 describe('計測チャレンジの採点', () => {
   // ながく止まって、ためずにすぐ投げる
-  const longQuick = fromCards(BASE, { s1: 1, s3: -1 });
+  const longQuick = fromCards(BASE, { s1: 1, s2: 0, s3: -1 });
 
   it('目標どおりなら満点', () => {
     const s = scoreChallenge(longQuick, { s1: 2.4, s2s3: 0.4, s4: 0.5 }, BASE);
@@ -50,7 +50,7 @@ describe('計測チャレンジの採点', () => {
   });
 
   it('「ふつう」が目標のときは、変える区間がない', () => {
-    const s = scoreChallenge(fromCards(BASE, { s1: 0, s3: 0 }), { s1: 1.3, s2s3: 0.6, s4: 0.5 }, BASE);
+    const s = scoreChallenge(fromCards(BASE, { s1: 0, s2: 0, s3: 0 }), { s1: 1.3, s2s3: 0.6, s4: 0.5 }, BASE);
     expect(s.parts.every((p) => !p.intended)).toBe(true);
     expect(s.clear).toBe(true);
   });

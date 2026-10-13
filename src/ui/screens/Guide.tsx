@@ -2,8 +2,9 @@
 // 端末を置いて 2〜3m はなれても分かるよう、画面全体の色と大きな文字で次の動きを見せる。
 
 import { useEffect, useRef, useState } from 'react';
-import { scheduleCues, sfx, speak, stopSpeaking, unlockAudio } from '../../audio/cues';
+import { scheduleCues, schedulePitchSounds, sfx, speak, stopSpeaking, unlockAudio } from '../../audio/cues';
 import { PRACTICE, SEGMENT } from '../../game/messages';
+import { PITCH } from '../../sim/constants';
 import { addPractice, REST_EVERY } from '../../practice/log';
 import { presetById, presetPattern, PRESETS, SEQUENCES } from '../../practice/presets';
 import { baselineOf, marks, totalTime, type Segments } from '../../sim/timing';
@@ -138,9 +139,14 @@ export function GuideScreen() {
       if (!alive()) return;
 
       const cues = scheduleCues(pattern, profile.settings.cueSound, LEAD_IN);
-      cancelCues.current = cues?.cancel ?? (() => {});
       // 音が使えない端末でも、画面の合図だけで練習できるようにする
       const setAtMs = cues?.setAtMs ?? performance.now() + LEAD_IN * 1000;
+      // リリースの合図のあと、ボールがミットに届く音（投げきった手ごたえ）
+      const cancelMitt = schedulePitchSounds({ plateAt: setAtMs + (marks(pattern).release + PITCH.BALL_FLIGHT) * 1000 }, 'mitt');
+      cancelCues.current = () => {
+        cues?.cancel();
+        cancelMitt();
+      };
       setActive({ pattern, setAtMs });
       setStatus('cue');
       await sleep(setAtMs - performance.now() + marks(pattern).release * 1000 + AFTER_MS);
@@ -158,7 +164,7 @@ export function GuideScreen() {
         return;
       }
       if (done % REST_EVERY === 0) {
-        sfx.good();
+        sfx.whistle();
         setStatus('rest');
         return;
       }
