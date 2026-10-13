@@ -16,7 +16,7 @@ function playStage(stageId: string, seed: number): { records: PitchRecord[]; out
   const records: PitchRecord[] = [];
   const levels = [-1, 0, 1] as const;
   for (let i = 0; i < 60 && s.outs < st.outsToClear && s.runs <= st.maxRuns; i++) {
-    const o = throwPitch(cfg, s, fromCards(BASE, { s1: levels[i % 3], s2: levels[(i * 2 + 1) % 3], s3: levels[(i + 2) % 3] }));
+    const o = throwPitch(cfg, s, fromCards(BASE, { s1: levels[i % 3], s3: ([-1, 0, 1, 2] as const)[(i + 2) % 4] }));
     s = o.state;
     records.push(o.record);
   }
@@ -81,6 +81,14 @@ describe('保存データ', () => {
     expect(p.stars).toEqual({});
     expect(p.settings.volume).toBe(1);
     expect(p.settings.practiceLimit).toBe(30);
+  });
+
+  it('古い版のデータ：ルール注意の長さを新しい最初の値にし、いまはないずらしの記録は捨てる', () => {
+    const p = normalizeProfile({ version: 1, settings: { maxTopHold: 0.3 }, stats: { kinds: { s2Quick: 4, s3Hold: 2 } } }, 'a');
+    expect(p.settings.maxTopHold).toBe(0.9);
+    expect(p.stats.kinds).toEqual({ s3Hold: 2 });
+    // 自分で変えた値はそのまま
+    expect(normalizeProfile({ version: 1, settings: { maxTopHold: 0.5 } }, 'a').settings.maxTopHold).toBe(0.5);
   });
 
   it('書き出して読み込むと元に戻る', () => {

@@ -226,7 +226,7 @@ export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern): Pit
     pickoffsInRow = 0;
     atBatPitches++;
     let strikeRate = cfg.strikeRate ?? PITCH.STRIKE_RATE;
-    if (p.s2 < PITCH.QUICK_S2) strikeRate -= PITCH.QUICK_S2_PENALTY;
+    if (p.s3 < PITCH.NO_HOLD_S3) strikeRate -= PITCH.NO_HOLD_PENALTY;
     if (p.s1 < PITCH.RUSHED_S1) strikeRate -= PITCH.RUSHED_S1_PENALTY;
     const inZone = d.zone < strikeRate;
 

@@ -660,12 +660,15 @@ select {
 }
 .card-choices {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 6px;
 }
 .choice {
-  padding: 8px 2px;
+  padding: 6px 2px;
   min-height: 48px;
+  font-size: 0.95rem;
+  line-height: 1.25;
 }
 .choice.on {
   border: 3px solid var(--fg);

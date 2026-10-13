@@ -35,7 +35,7 @@ export interface StageDef {
   /** ランナーが盗塁を狙うか */
   stealing: boolean;
   /** このステージから使えるもの */
-  cards: { s3: boolean; events: boolean; realtime: boolean };
+  cards: { /** 「ながくためる」のカード */ s3Long: boolean; events: boolean; realtime: boolean };
   /** クリアしたらもらえる称号 */
   title?: string;
   /** はじめに出すひとこと */
@@ -53,8 +53,8 @@ export const STAGES: StageDef[] = [
     outsToClear: 3,
     maxRuns: 1,
     stealing: false,
-    cards: { s3: false, events: false, realtime: false },
-    intro: 'まずは「とまる」と「あしあげ」を{変|か}えてみよう。{同|おな}じリズムばかりだと{打|う}たれるぞ。',
+    cards: { s3Long: false, events: false, realtime: false },
+    intro: 'まずは「とまる」と「ため」の{長|なが}さを{変|か}えてみよう。{同|おな}じリズムばかりだと{打|う}たれるぞ。',
   },
   {
     id: 'district',
@@ -66,8 +66,8 @@ export const STAGES: StageDef[] = [
     outsToClear: 3,
     maxRuns: 1,
     stealing: false,
-    cards: { s3: true, events: false, realtime: false },
-    intro: '「ため」のカードが{使|つか}えるようになった。せっかちには「ため」、じっくり{型|がた}には「クイック」がきくぞ。',
+    cards: { s3Long: true, events: false, realtime: false },
+    intro: '「ながくためる」のカードが{使|つか}えるようになった。せっかちには「ためる」、じっくり{型|がた}には「すぐ」がきくぞ。',
   },
   {
     id: 'semifinal',
@@ -79,7 +79,7 @@ export const STAGES: StageDef[] = [
     outsToClear: 3,
     maxRuns: 1,
     stealing: true,
-    cards: { s3: true, events: true, realtime: false },
+    cards: { s3Long: true, events: true, realtime: false },
     intro: 'ランナーは「とまる」の{長|なが}さを{読|よ}んで{走|はし}ってくる。{長|なが}さを{変|か}えたり、けんせいを{入|い}れたりしよう。{止|と}まらずに{投|な}げるとボークだ。',
   },
   {
@@ -92,8 +92,8 @@ export const STAGES: StageDef[] = [
     outsToClear: 3,
     maxRuns: 0,
     stealing: true,
-    cards: { s3: true, events: true, realtime: true },
-    intro: '1{点|てん}リードの{終盤|しゅうばん}。{強打者|きょうだしゃ}は1つ{変|か}えただけでは{合|あ}わせてくる。2つ{以上|いじょう}まぜよう。',
+    cards: { s3Long: true, events: true, realtime: true },
+    intro: '1{点|てん}リードの{終盤|しゅうばん}。{強打者|きょうだしゃ}は{少|すこ}しの{変化|へんか}なら{合|あ}わせてくる。「とまる」と「ため」を{両方|りょうほう}{変|か}えよう。',
   },
   {
     // ---- リベンジ：あの日の場面 ----
@@ -107,7 +107,7 @@ export const STAGES: StageDef[] = [
     outsToClear: 3,
     maxRuns: 0,
     stealing: true,
-    cards: { s3: true, events: true, realtime: true },
+    cards: { s3Long: true, events: true, realtime: true },
     title: 'サヨナラを{止|と}めた{男|おとこ}',
     intro: '4{対|たい}4の{同点|どうてん}、1アウト{二塁|にるい}。1{点|てん}でも{取|と}られたらサヨナラ{負|ま}けだ。あの{強打者|きょうだしゃ}は、{前|まえ}の{球|たま}と{同|おな}じ{間|ま}なら{必|かなら}ず{打|う}つ。{大|おお}きく{変|か}えろ。',
   },

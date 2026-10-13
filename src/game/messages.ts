@@ -3,7 +3,7 @@
 
 import { isBatterOut } from '../sim/atBat';
 import { PITCH, RULES } from '../sim/constants';
-import type { CardLevel } from '../sim/constants';
+import type { CardKey, CardLevel } from '../sim/constants';
 import type { Segments } from '../sim/timing';
 import type { BatterType, PitchRecord, PitchResult, RuleWarning, SegmentKey, ShiftKind, TimingGrade } from '../types';
 
@@ -14,24 +14,22 @@ export const APP_TITLE_PLAIN = 'タイミング外しピッチャー';
 
 export const SEGMENT: Record<SegmentKey, { name: string; desc: string }> = {
   s1: { name: 'とまる', desc: 'セットでピタッと{止|と}まってから、{足|あし}を{上|あ}げはじめるまで' },
-  s2: { name: 'あしあげ', desc: '{足|あし}を{上|あ}げはじめてから、いちばん{高|たか}いところまで' },
-  s3: { name: 'ため', desc: 'いちばん{高|たか}いところから、{前|まえ}へ{動|うご}き{出|だ}すまで' },
+  s2: { name: 'あしあげ', desc: '{足|あし}を{上|あ}げはじめてから、いちばん{高|たか}いところまで（いつも{同|おな}じ{速|はや}さ）' },
+  s3: { name: 'ため', desc: '{足|あし}を{上|あ}げて{止|と}まってから、{前|まえ}へ{動|うご}き{出|だ}すまで' },
   s4: { name: 'ふみだし', desc: '{前|まえ}へ{動|うご}き{出|だ}してから、ボールをはなすまで' },
 };
 
-export const CARD: Record<'s1' | 's2' | 's3', Record<CardLevel, string>> = {
+export const CARD: Record<CardKey, Partial<Record<CardLevel, string>>> = {
   s1: { [-1]: 'みじかく', 0: 'ふつう', 1: 'ながく' },
-  s2: { [-1]: 'クイック', 0: 'ふつう', 1: 'ゆっくり' },
-  s3: { [-1]: 'すぐ', 0: 'ふつう', 1: 'ためる' },
+  s3: { [-1]: 'すぐ', 0: 'ふつう', 1: 'ためる', 2: 'ながくためる' },
 };
 
 export const KIND: Record<ShiftKind, string> = {
   s1Short: 'みじかく{止|と}まる',
   s1Long: '{長|なが}く{止|と}まる',
-  s2Quick: 'クイック',
-  s2Slow: 'ゆっくり{足|あし}あげ',
-  s3Quick: 'すぐ{前|まえ}へ',
+  s3Quick: 'ためずにすぐ',
   s3Hold: 'ため',
+  s3Long: '{長|なが}いため',
   pickoff: 'けんせい',
   stepOff: 'プレートを{外|はず}す',
 };
@@ -60,7 +58,6 @@ export const diffSec = (v: number, digits = 1) => `${v >= 0 ? '+' : '−'}${Math
 export function describeDiff(p: Segments, base: Segments): string {
   const parts: string[] = [];
   if (Math.abs(p.s1 - base.s1) >= 0.15) parts.push(`${SEGMENT.s1.name} ${diffSec(p.s1 - base.s1)}`);
-  if (Math.abs(p.s2 - base.s2) >= 0.05) parts.push(`${SEGMENT.s2.name} ${diffSec(p.s2 - base.s2, 2)}`);
   if (Math.abs(p.s3 - base.s3) >= 0.05) parts.push(`${SEGMENT.s3.name} ${diffSec(p.s3 - base.s3, 2)}`);
   return parts.length ? parts.join('・') : 'ふつうと{同|おな}じ';
 }
@@ -77,26 +74,26 @@ export const BATTER: Record<BatterType, { name: string; icon: string; desc: stri
   hasty: {
     name: 'せっかち',
     icon: '😤',
-    desc: '{早|はや}く{振|ふ}りたがる。「ため」や「ゆっくり」に{特|とく}に{弱|よわ}い。',
-    tip: '「ため」「ゆっくり」で{泳|およ}がせよう',
+    desc: '{早|はや}く{振|ふ}りたがる。「ため」に{特|とく}に{弱|よわ}い。',
+    tip: '「ためる」で{泳|およ}がせよう',
   },
   patient: {
     name: 'じっくり{型|がた}',
     icon: '🧐',
-    desc: '{長|なが}く{止|と}まっても{力|りき}まない。クイックに{弱|よわ}い。',
-    tip: '「クイック」「すぐ」で{差|さ}しこもう',
+    desc: '{長|なが}く{止|と}まっても{力|りき}まない。ためずに「すぐ」{投|な}げられるのに{弱|よわ}い。',
+    tip: '「すぐ」で{差|さ}しこもう',
   },
   slugger: {
     name: '{強打者|きょうだしゃ}',
     icon: '😎',
-    desc: 'すぐ{合|あ}わせてくる。1つ{変|か}えただけでは{見|み}て{合|あ}わせられる。',
-    tip: '2つ{以上|いじょう}まぜて、{毎球|まいきゅう}{変|か}えよう',
+    desc: 'すぐ{合|あ}わせてくる。{少|すこ}しの{変化|へんか}は{見|み}て{合|あ}わせられる。',
+    tip: '「とまる」と「ため」を{両方|りょうほう}、{毎球|まいきゅう}{変|か}えよう',
   },
   boss: {
     name: 'あの{日|ひ}の{強打者|きょうだしゃ}',
     icon: '🔥',
     desc: '{前|まえ}の{球|たま}と{同|おな}じ{間|ま}なら{必|かなら}ず{打|う}つ。{少|すこ}しの{変化|へんか}も{合|あ}わせてくる。',
-    tip: '{前|まえ}の{球|たま}と{大|おお}きく{変|か}えろ（クイック⇔ゆっくり＋ため）',
+    tip: '{前|まえ}の{球|たま}と{大|おお}きく{変|か}えろ（すぐ ⇔ ながくためる、{止|と}まる{長|なが}さも）',
   },
 };
 
@@ -194,16 +191,16 @@ export function managerComment(atBat: PitchRecord[]): string {
   }
 
   if (last.result === 'ball' && last.atBatEnd) {
-    if (pitches.some((r) => r.pattern.s2 < PITCH.QUICK_S2 || r.pattern.s1 < PITCH.RUSHED_S1))
-      return '{急|いそ}ぎすぎるとコントロールが{乱|みだ}れる。クイックや{短|みじか}いセットは、ここぞの1{球|きゅう}に{使|つか}おう。';
+    if (pitches.some((r) => r.pattern.s3 < PITCH.NO_HOLD_S3 || r.pattern.s1 < PITCH.RUSHED_S1))
+      return '{急|いそ}ぎすぎるとコントロールが{乱|みだ}れる。「すぐ」や{短|みじか}いセットは、ここぞの1{球|きゅう}に{使|つか}おう。';
     return 'フォアボールはもったいない。ずらしは{十分|じゅうぶん}だ、{落|お}ち{着|つ}いていこう。';
   }
 
   if (out) {
-    if (prev && prev.kinds.includes('s1Long') && (last.kinds.includes('s2Quick') || last.kinds.includes('s3Quick')))
-      return '{長|なが}く{止|と}まってからのクイック、いいずらし{方|かた}だ！';
-    if (prev && (prev.kinds.includes('s2Quick') || prev.kinds.includes('s3Quick')) && (last.kinds.includes('s3Hold') || last.kinds.includes('s2Slow')))
-      return '{速|はや}い{動|うご}きを{見|み}せてから、ゆっくり。{打者|だしゃ}は{待|ま}ちきれずに{泳|およ}いだぞ！';
+    if (prev && prev.kinds.includes('s1Long') && last.kinds.includes('s3Quick'))
+      return '{長|なが}く{止|と}まってから、ためずにすぐ。いいずらし{方|かた}だ！';
+    if (prev && !prev.kinds.includes('s3Hold') && !prev.kinds.includes('s3Long') && (last.kinds.includes('s3Hold') || last.kinds.includes('s3Long')))
+      return 'すぐ{投|な}げるのを{見|み}せてから、ためた。{打者|だしゃ}は{待|ま}ちきれずに{泳|およ}いだぞ！';
     if (last.timing === 'broken') return '{完全|かんぜん}にタイミングをくずした！いまの{間|ま}の{変|か}え{方|かた}を{覚|おぼ}えておこう。';
     if (maxStreak <= 1 && pitches.length >= 3) return '{毎球|まいきゅう}リズムを{変|か}えられた。これなら{強|つよ}いバッターも{合|あ}わせられない！';
     if (last.timing === 'just') return 'タイミングは{合|あ}わされたが、{正面|しょうめん}をついて{助|たす}かった。{次|つぎ}はリズムを{変|か}えよう。';
@@ -248,7 +245,8 @@ export const TUTORIAL: TutorialPage[] = [
     title: '{投|な}げる{動|うご}きは4つに{分|わ}けられる',
     body: [
       'セットで{止|と}まってからボールをはなすまでを、4つの{区間|くかん}に{分|わ}けて{考|かんが}えよう。',
-      'このアプリでは、「とまる」「あしあげ」「ため」の{長|なが}さを{変|か}えて、バッターをずらす。',
+      '{足|あし}を{上|あ}げる{速|はや}さは、いつも{同|おな}じ。{速|はや}さを{変|か}えても、バッターは{足|あし}が{上|あ}がって{止|と}まったところからタイミングを{取|と}りなおせるからだ。',
+      'このアプリでは、「とまる」と「ため」の{長|なが}さを{変|か}えて、バッターをずらす。',
     ],
     figure: 'segments',
   },
@@ -263,8 +261,8 @@ export const TUTORIAL: TutorialPage[] = [
   {
     title: '{前|まえ}の{球|たま}と{変|か}える',
     body: [
-      'ずらす{場所|ばしょ}は1つじゃない。{止|と}まる{長|なが}さ、{足|あし}を{上|あ}げる{速|はや}さ、ため、そして、けんせい。',
-      '{大事|だいじ}なのは{組|く}み{合|あ}わせと{順番|じゅんばん}。「{長|なが}く{止|と}まる → クイック」のように、{前|まえ}の{球|たま}と{比|くら}べて{変|か}えよう。',
+      'ずらす{場所|ばしょ}は1つじゃない。セットで{止|と}まる{長|なが}さ、{足|あし}を{上|あ}げて{止|と}まる{長|なが}さ（ため）、そして、けんせい。',
+      '{大事|だいじ}なのは{組|く}み{合|あ}わせと{順番|じゅんばん}。「{長|なが}く{止|と}まる → ためずにすぐ」のように、{前|まえ}の{球|たま}と{比|くら}べて{変|か}えよう。',
     ],
     figure: 'mix',
   },

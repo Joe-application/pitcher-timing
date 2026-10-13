@@ -113,7 +113,7 @@ export function SettingsScreen() {
             <R>{'「ルール{注意|ちゅうい}」を{出|だ}す{長|なが}さ'}</R> <b>{s.maxTopHold.toFixed(2)}</b>
             <R>{'{秒|びょう}'}</R>
           </span>
-          <input type="range" min={0.1} max={1} step={0.05} value={s.maxTopHold} onChange={(e) => set({ maxTopHold: Number(e.target.value) })} />
+          <input type="range" min={0.1} max={1.5} step={0.05} value={s.maxTopHold} onChange={(e) => set({ maxTopHold: Number(e.target.value) })} />
         </label>
         <p className="warn">
           <R>{RULE_NOTE}</R>

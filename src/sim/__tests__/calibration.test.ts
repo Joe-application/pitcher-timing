@@ -45,8 +45,8 @@ describe('キャリブレーション（§10）', () => {
     expect(same).toBeLessThan(0.45);
   });
 
-  it('2. 混ぜると打ち取れる：強打者に毎球2区間以上を変えると、打ち取り率 55%以上', () => {
-    expect(outRate('slugger', policies.twoSegments, '強打者 × 毎球2区間以上を変える')).toBeGreaterThanOrEqual(0.55);
+  it('2. 混ぜると打ち取れる：強打者に毎球「とまる」と「ため」の両方を変えると、打ち取り率 55%以上', () => {
+    expect(outRate('slugger', policies.twoSegments, '強打者 × 毎球2区間とも変える')).toBeGreaterThanOrEqual(0.55);
   });
 
   it('3. 弱い打者は少しのずれで崩れる：まっすぐ待ちは1区間を変えるだけで 60%以上', () => {
@@ -71,7 +71,7 @@ describe('キャリブレーション（§10）', () => {
         const rng = createRng(hashSeed(55, i));
         let r = initRunner(BASE);
         for (let k = 0; k < 6; k++) {
-          const p = pat({ s1: vary ? rng.pick([-1, 0, 1] as const) : 0, s2: 0, s3: 0 });
+          const p = pat({ s1: vary ? rng.pick([-1, 0, 1] as const) : 0, s3: 0 });
           const chance = stealSuccessChance(r, p, BASE, rng.normal());
           total++;
           if (rng.next() < chance) ok++;
@@ -90,7 +90,7 @@ describe('キャリブレーション（§10）', () => {
 
   it('6. ボス：でたらめでは打ち取り率 30%未満、「直前と大きく変える」なら 50%以上', () => {
     outRate('boss', policies.normal, 'ボス × いつもふつう');
-    outRate('boss', policies.twoSegments, 'ボス × 毎球2区間以上を変える');
+    outRate('boss', policies.twoSegments, 'ボス × 毎球2区間とも変える');
     expect(outRate('boss', policies.random, 'ボス × でたらめ')).toBeLessThan(0.3);
     expect(outRate('boss', policies.bigChange, 'ボス × 直前と大きく変える')).toBeGreaterThanOrEqual(0.5);
   });
@@ -106,7 +106,7 @@ describe('キャリブレーション（§10）', () => {
     expect(checkRules({ ...NORMAL, s1: RULES.MAX_SET_STOP + 0.1 }, { runnerOn: false })).toContain('delay');
     // カードだけで投げているかぎり、反則や注意にはならない
     for (const s1 of [-1, 0, 1] as const)
-      for (const s3 of [-1, 0, 1] as const) expect(checkRules(fromCards(BASE, { s1, s2: 0, s3 }), { runnerOn: true })).toEqual([]);
+      for (const s3 of [-1, 0, 1, 2] as const) expect(checkRules(fromCards(BASE, { s1, s3 }), { runnerOn: true })).toEqual([]);
     // ボークになると走者が進む
     const cfg = config(['straight'], 1);
     const o = throwPitch(cfg, initGame(cfg, { bases: [false, false, true] }), quickSet);

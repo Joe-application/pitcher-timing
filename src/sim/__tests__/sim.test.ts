@@ -5,21 +5,29 @@ import { gradeOf, initBatter, resetBatter, swingTiming, updateBatter } from '../
 import { BATTERS, DEFAULT_BASELINE, RULES, RUNNER } from '../constants';
 import { initRunner, pickoffOutChance, stealSuccessChance } from '../runner';
 import { baselineOf, changedSegments, fromCards, liftToRelease, marks, sameRhythm, shiftKinds } from '../timing';
-import { BASE, config, NORMAL, pat } from './helpers';
+import { ALL_CARDS, BASE, config, NORMAL, pat } from './helpers';
 
 describe('区間の計算', () => {
   it('カードは「ふつう」からの差で決まる', () => {
     expect(NORMAL).toMatchObject({ s1: 1.2, s2: 0.42, s3: 0.12, s4: 0.48 });
-    expect(pat({ s1: -1, s2: -1, s3: -1 })).toMatchObject({ s1: 0.6, s2: 0.2, s3: 0 });
-    expect(pat({ s1: 1, s2: 1, s3: 1 })).toMatchObject({ s1: 2.5, s2: 0.7, s3: 0.3 });
+    expect(pat({ s1: -1, s3: -1 })).toMatchObject({ s1: 0.6, s3: 0 });
+    expect(pat({ s1: 1, s3: 1 })).toMatchObject({ s1: 2.5, s3: 0.45 });
+    expect(pat({ s1: 0, s3: 2 })).toMatchObject({ s1: 1.2, s3: 0.8 });
+  });
+
+  it('あしあげの速さは、どのカードでも「ふつう」と同じ（ずらしは「とまる」と「ため」で作る）', () => {
+    for (const c of ALL_CARDS) {
+      expect(pat(c).s2).toBe(BASE.s2);
+      expect(pat(c).s4).toBe(BASE.s4);
+    }
   });
 
   it('「ふつう」が人によって違っても、カードでは反則にならない', () => {
     const quickKid = { s1: 0.8, s2: 0.25, s3: 0.02, s4: 0.4 };
-    const p = fromCards(quickKid, { s1: -1, s2: -1, s3: 1 });
+    const p = fromCards(quickKid, { s1: -1, s3: 1 });
     expect(p.s1).toBeGreaterThanOrEqual(RULES.MIN_SET_STOP);
     expect(p.s3).toBeLessThanOrEqual(RULES.MAX_TOP_HOLD);
-    expect(p.s2).toBeGreaterThan(0);
+    expect(p.s2).toBe(quickKid.s2);
   });
 
   it('実測した「ふつう」がなければ目安を使い、おかしな値は範囲におさめる', () => {
@@ -31,11 +39,13 @@ describe('区間の計算', () => {
 
   it('同じリズム・変えた区間・ずらしの種類', () => {
     expect(sameRhythm(NORMAL, { ...NORMAL, s1: 1.3 })).toBe(true);
-    expect(sameRhythm(NORMAL, pat({ s1: 0, s2: -1, s3: 0 }))).toBe(false);
-    expect(changedSegments(NORMAL, pat({ s1: 1, s2: 0, s3: 1 }))).toEqual(['s1', 's3']);
-    expect(shiftKinds(pat({ s1: 1, s2: -1, s3: 0 }), BASE)).toEqual(['s1Long', 's2Quick']);
+    expect(sameRhythm(NORMAL, pat({ s1: 0, s3: -1 }))).toBe(false);
+    expect(changedSegments(NORMAL, pat({ s1: 1, s3: 1 }))).toEqual(['s1', 's3']);
+    expect(shiftKinds(pat({ s1: 1, s3: -1 }), BASE)).toEqual(['s1Long', 's3Quick']);
+    expect(shiftKinds(pat({ s1: 0, s3: 1 }), BASE)).toEqual(['s3Hold']);
+    expect(shiftKinds(pat({ s1: 0, s3: 2 }), BASE)).toEqual(['s3Long']);
     expect(shiftKinds(NORMAL, BASE)).toEqual([]);
-    expect(shiftKinds(fromCards(BASE, { s1: 0, s2: 0, s3: 0 }, 'pickoff'), BASE)).toEqual(['pickoff']);
+    expect(shiftKinds(fromCards(BASE, { s1: 0, s3: 0 }, 'pickoff'), BASE)).toEqual(['pickoff']);
   });
 
   it('合図の時刻はセット完了からの積み上げ', () => {
@@ -50,12 +60,12 @@ describe('打者モデル', () => {
   it('予想どおりなら誤差はばらつきだけ、長くすると早く振りすぎ（正）、短くすると振りおくれ（負）', () => {
     const b = initBatter('straight', BASE);
     expect(swingTiming(b, NORMAL, 0).error).toBeCloseTo(0);
-    expect(swingTiming(b, pat({ s1: 0, s2: 1, s3: 0 }), 0).error).toBeGreaterThan(0.18);
-    expect(swingTiming(b, pat({ s1: 0, s2: -1, s3: 0 }), 0).error).toBeLessThan(-0.18);
+    expect(swingTiming(b, pat({ s1: 0, s3: 1 }), 0).error).toBeGreaterThan(0.18);
+    expect(swingTiming(b, pat({ s1: 0, s3: -1 }), 0).error).toBeLessThan(-0.05);
   });
 
   it('予想は指数移動平均で更新される', () => {
-    const slow = pat({ s1: 0, s2: 1, s3: 0 });
+    const slow = pat({ s1: 0, s3: 1 });
     const b = updateBatter(initBatter('slugger', BASE), slow);
     const want = liftToRelease(BASE) + BATTERS.slugger.alpha * (liftToRelease(slow) - liftToRelease(BASE));
     expect(b.expLtr).toBeCloseTo(want);
@@ -64,31 +74,31 @@ describe('打者モデル', () => {
   });
 
   it('強い打者は少しのずれなら見て合わせる', () => {
-    const hold = pat({ s1: 0, s2: 0, s3: 1 });
+    const hold = pat({ s1: 0, s3: 1 });
     expect(swingTiming(initBatter('boss', BASE), hold, 0).grade).toBe('just');
     expect(swingTiming(initBatter('straight', BASE), hold, 0).grade).not.toBe('just');
   });
 
-  it('せっかちは「ため」に、じっくり型はクイックに弱い', () => {
-    const hold = pat({ s1: 0, s2: 0, s3: 1 });
-    const quick = pat({ s1: 0, s2: -1, s3: 0 });
+  it('せっかちは「ため」に、じっくり型は「すぐ」に弱い', () => {
+    const hold = pat({ s1: 0, s3: 1 });
+    const quick = pat({ s1: 0, s3: -1 });
     const err = (t: 'hasty' | 'patient', p: typeof hold) => Math.abs(swingTiming(initBatter(t, BASE), p, 0).error);
     expect(err('hasty', hold)).toBeGreaterThan(err('patient', hold));
     expect(err('patient', quick)).toBeGreaterThan(err('hasty', quick));
   });
 
   it('長いセットで力む（じっくり型とボスは力まない）、短いセットで差し込まれる', () => {
-    const long = pat({ s1: 1, s2: 0, s3: 0 });
+    const long = pat({ s1: 1, s3: 0 });
     expect(swingTiming(initBatter('straight', BASE), long, 0).tense).toBe(true);
     expect(swingTiming(initBatter('patient', BASE), long, 0).tense).toBe(false);
-    const short = swingTiming(initBatter('straight', BASE), pat({ s1: -1, s2: 0, s3: 0 }), 0);
+    const short = swingTiming(initBatter('straight', BASE), pat({ s1: -1, s3: 0 }), 0);
     expect(short.rushed).toBe(true);
     expect(short.error).toBeLessThan(0);
   });
 
   it('同じリズムが続くと数えられ、プレートを外すと仕切り直しになる', () => {
     let b = initBatter('slugger', BASE);
-    const slow = pat({ s1: 0, s2: 1, s3: 0 });
+    const slow = pat({ s1: 0, s3: 1 });
     b = updateBatter(updateBatter(b, slow), slow);
     expect(b.streak).toBe(2);
     const reset = resetBatter(b, BASE, RUNNER.stepOffReset);
@@ -105,12 +115,12 @@ describe('打者モデル', () => {
 });
 
 describe('走者・牽制', () => {
-  it('予想どおりの S1 だと好スタート、クイックは盗塁対策になる', () => {
+  it('予想どおりの S1 だと好スタート、ためずにすぐ投げると盗塁対策になる', () => {
     const r = initRunner(BASE);
     const normal = stealSuccessChance(r, NORMAL, BASE, 0);
     expect(normal).toBeGreaterThan(0.85);
-    expect(stealSuccessChance(r, pat({ s1: 1, s2: 0, s3: 0 }), BASE, 0)).toBeLessThan(0.3);
-    expect(stealSuccessChance(r, pat({ s1: 0, s2: -1, s3: -1 }), BASE, 0)).toBeLessThan(normal);
+    expect(stealSuccessChance(r, pat({ s1: 1, s3: 0 }), BASE, 0)).toBeLessThan(0.3);
+    expect(stealSuccessChance(r, pat({ s1: 0, s3: -1 }), BASE, 0)).toBeLessThan(normal);
     expect(stealSuccessChance(r, NORMAL, BASE, 0, true)).toBeLessThan(normal);
   });
 
@@ -184,7 +194,7 @@ describe('打席の進行', () => {
   it('牽制・外すは続けて3回まで。4回目はボールが増える', () => {
     const cfg = config(['straight'], 5);
     let s = initGame(cfg, { bases: [true, false, false] });
-    const stepOff = fromCards(BASE, { s1: 0, s2: 0, s3: 0 }, 'stepOff');
+    const stepOff = fromCards(BASE, { s1: 0, s3: 0 }, 'stepOff');
     for (let i = 0; i < 3; i++) {
       const o = throwPitch(cfg, s, stepOff);
       expect(o.record.warnings).toEqual([]);
@@ -197,7 +207,7 @@ describe('打席の進行', () => {
   });
 
   it('牽制でアウトにすると走者がいなくなる', () => {
-    const pickoff = fromCards(BASE, { s1: 0, s2: 0, s3: 0 }, 'pickoff');
+    const pickoff = fromCards(BASE, { s1: 0, s3: 0 }, 'pickoff');
     let got = 0;
     for (let seed = 1; seed <= 300; seed++) {
       const cfg = config(['straight'], seed);
@@ -227,7 +237,7 @@ describe('打席の進行', () => {
     const cfg = config(['slugger'], 42);
     const s = initGame(cfg);
     const a = throwPitch(cfg, s, NORMAL);
-    const b = throwPitch(cfg, s, pat({ s1: 1, s2: -1, s3: -1 }));
+    const b = throwPitch(cfg, s, pat({ s1: 1, s3: -1 }));
     expect(a.record.seed).toBe(b.record.seed);
     expect(throwPitch(cfg, s, NORMAL).record).toEqual(a.record);
   });

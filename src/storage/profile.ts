@@ -2,10 +2,11 @@
 // 保存するのはニックネームと記録だけ。個人情報は扱わない。
 
 import { RULES, PITCH } from '../sim/constants';
-import type { Baseline, PracticeRecord, Profile, Settings, Stats, TimingPattern } from '../types';
+import type { Baseline, PracticeRecord, Profile, Settings, ShiftKind, Stats, TimingPattern } from '../types';
 
 /** 保存形式のバージョン。形を変えたら上げて、loadProfile で読み替える */
-export const SCHEMA_VERSION = 1;
+/** 2 = 「あしあげ」の速さを固定し、「ため」を主なずらしにした版（2026-10-13）。ルール注意の長さの最初の値が 0.3 → 0.9 */
+export const SCHEMA_VERSION = 2;
 const PREFIX = 'pitcherTiming:v1';
 
 export const KEYS = {
@@ -86,6 +87,7 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const bool = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+const KINDS: string[] = ['s1Short', 's1Long', 's3Quick', 's3Hold', 's3Long', 'pickoff', 'stepOff'] satisfies ShiftKind[];
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 // ---- 読み込んだものを正しい形にそろえる ----
@@ -119,14 +121,16 @@ function normalizeBaseline(v: unknown): Baseline | undefined {
   return [b.s1, b.s2, b.s3, b.s4].every((x) => Number.isFinite(x) && x >= 0) ? b : undefined;
 }
 
-function normalizeSettings(v: unknown): Settings {
+function normalizeSettings(v: unknown, version: number): Settings {
   const o = isObj(v) ? v : {};
   const d = DEFAULT_SETTINGS;
+  // 古い版の最初の値（0.3）のままなら、新しい最初の値にする。0.3 のままだと「ためる」カードで毎回注意が出てしまう
+  const oldHold = version < 2 && o.maxTopHold === 0.3;
   return {
     balkCheck: bool(o.balkCheck, d.balkCheck),
     minSetStop: clamp(num(o.minSetStop, d.minSetStop), 0.2, 2),
     topHoldWarning: bool(o.topHoldWarning, d.topHoldWarning),
-    maxTopHold: clamp(num(o.maxTopHold, d.maxTopHold), 0.1, 1),
+    maxTopHold: oldHold ? d.maxTopHold : clamp(num(o.maxTopHold, d.maxTopHold), 0.1, 1.5),
     volume: clamp(num(o.volume, d.volume), 0, 1),
     cueSound: o.cueSound === 'wood' || o.cueSound === 'drum' ? o.cueSound : 'beep',
     practiceLimit: Math.round(clamp(num(o.practiceLimit, d.practiceLimit), 5, 100)),
@@ -137,7 +141,8 @@ function normalizeSettings(v: unknown): Settings {
 function normalizeStats(v: unknown): Stats {
   const o = isObj(v) ? v : {};
   const kinds: Stats['kinds'] = {};
-  if (isObj(o.kinds)) for (const [k, x] of Object.entries(o.kinds)) (kinds as Record<string, number>)[k] = num(x, 0);
+  // いまはないずらし（古い版の「クイック」「ゆっくり足あげ」）は捨てる
+  if (isObj(o.kinds)) for (const [k, x] of Object.entries(o.kinds)) if (KINDS.includes(k)) (kinds as Record<string, number>)[k] = num(x, 0);
   return {
     pitches: num(o.pitches, 0),
     atBats: num(o.atBats, 0),
@@ -186,7 +191,7 @@ export function normalizeProfile(v: unknown, nickname: string): Profile {
     rank: num(o.rank, 0),
     stars,
     badges: strings(o.badges),
-    settings: normalizeSettings(o.settings),
+    settings: normalizeSettings(o.settings, num(o.version, 1)),
     stats: normalizeStats(o.stats),
     practice: normalizePractice(o.practice),
     version: SCHEMA_VERSION,

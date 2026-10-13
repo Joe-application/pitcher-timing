@@ -1,18 +1,17 @@
 // 区間の計算と、ルール（ボーク・二段モーション・遅延）の判定。純粋関数のみ。
 
 import type { Baseline, PitchEvent, RuleWarning, Seconds, SegmentKey, ShiftKind, TimingPattern } from '../types';
-import { BASELINE_LIMITS, CARD_DELTA, CARD_LIMITS, DEFAULT_BASELINE, RULES, SAME_TOLERANCE, SHIFT_THRESHOLD, type CardLevel } from './constants';
+import { BASELINE_LIMITS, CARD_DELTA, CARD_LIMITS, DEFAULT_BASELINE, RULES, SAME_TOLERANCE, SHIFT_THRESHOLD, type CardKey, type CardLevel } from './constants';
 
 export type Segments = Record<SegmentKey, Seconds>;
 
-/** カードの組み合わせ（とまる・あしあげ・ため） */
+/** カードの組み合わせ（とまる・ため）。あしあげの速さはいつも同じ */
 export interface Cards {
   s1: CardLevel;
-  s2: CardLevel;
   s3: CardLevel;
 }
 
-export const NORMAL_CARDS: Cards = { s1: 0, s2: 0, s3: 0 };
+export const NORMAL_CARDS: Cards = { s1: 0, s3: 0 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -36,17 +35,17 @@ export function baselineOf(b?: Baseline | null): Segments {
 
 /** カードから実際の区間の長さを作る（「ふつう」からの差で決まる） */
 export function fromCards(base: Segments, cards: Cards, event: PitchEvent | null = null, name = ''): TimingPattern {
-  const seg = (k: 's1' | 's2' | 's3'): Seconds => {
-    const level = cards[k];
-    if (level === 0) return round3(base[k]);
+  const seg = (k: CardKey): Seconds => {
+    const delta = CARD_DELTA[k][cards[k]] ?? 0;
+    if (delta === 0) return round3(base[k]);
     const [lo, hi] = CARD_LIMITS[k];
-    return round3(clamp(base[k] + CARD_DELTA[k][level], lo, hi));
+    return round3(clamp(base[k] + delta, lo, hi));
   };
   return {
-    id: `c${cards.s1}${cards.s2}${cards.s3}${event ?? ''}`,
+    id: `c${cards.s1}${cards.s3}${event ?? ''}`,
     name,
     s1: seg('s1'),
-    s2: seg('s2'),
+    s2: round3(base.s2),
     s3: seg('s3'),
     s4: round3(base.s4),
     event,
@@ -72,12 +71,10 @@ export function shiftKinds(p: TimingPattern, base: Segments): ShiftKind[] {
   const d1 = p.s1 - base.s1;
   if (d1 <= -SHIFT_THRESHOLD.s1) kinds.push('s1Short');
   if (d1 >= SHIFT_THRESHOLD.s1) kinds.push('s1Long');
-  const d2 = p.s2 - base.s2;
-  if (d2 <= -SHIFT_THRESHOLD.s2) kinds.push('s2Quick');
-  if (d2 >= SHIFT_THRESHOLD.s2) kinds.push('s2Slow');
   const d3 = p.s3 - base.s3;
   if (d3 <= -SHIFT_THRESHOLD.s3) kinds.push('s3Quick');
-  if (d3 >= SHIFT_THRESHOLD.s3) kinds.push('s3Hold');
+  if (d3 >= SHIFT_THRESHOLD.s3Long) kinds.push('s3Long');
+  else if (d3 >= SHIFT_THRESHOLD.s3) kinds.push('s3Hold');
   return kinds;
 }
 

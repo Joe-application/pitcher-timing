@@ -6,7 +6,7 @@ import { BATTER, BUTTONS, CARD, describeDiff, managerComment, preHint, RESULT, R
 import { addGameStats, earnedBadges, rankIndex, rankPoints, REALTIME_RANK, summarize } from '../../game/progression';
 import { stageById, type StageDef } from '../../game/stages';
 import { initGame, isBatterOut, isCleared, isOver, pickoffTarget, runnerOn, throwPitch, type GameConfig, type GameState, type PitchOutcome } from '../../sim/atBat';
-import { RULES, type CardLevel } from '../../sim/constants';
+import { CARD_LEVELS, RULES, type CardKey, type CardLevel } from '../../sim/constants';
 import { randomSeed } from '../../sim/rng';
 import { baselineOf, fromCards, NORMAL_CARDS, type Cards } from '../../sim/timing';
 import { MAX_PATTERNS } from '../../storage/profile';
@@ -24,7 +24,6 @@ interface Entry {
 }
 
 type Phase = 'intro' | 'choose' | 'anim' | 'atBatEnd';
-const LEVELS: CardLevel[] = [-1, 0, 1];
 /** カード方式で、ボタンを押してからセット完了までの時間 */
 const LEAD_MS = 450;
 /** リアルタイム方式で、足を上げたまま止めていられる上限（秒） */
@@ -39,12 +38,13 @@ function playResultSound(r: PitchRecord) {
   else if (r.result === 'pickoffOut') sfx.good();
 }
 
-function CardPicker({ seg, value, onChange, disabled }: { seg: 's1' | 's2' | 's3'; value: CardLevel; onChange: (v: CardLevel) => void; disabled?: boolean }) {
+function CardPicker({ seg, value, onChange, disabled, max = 2 }: { seg: CardKey; value: CardLevel; onChange: (v: CardLevel) => void; disabled?: boolean; /** 選べるいちばん長い段階 */ max?: CardLevel }) {
+  const levels = CARD_LEVELS[seg].filter((lv) => lv <= max);
   return (
     <div className={`card-row ${seg}`}>
       <span className="card-row-name">{SEGMENT[seg].name}</span>
       <div className="card-choices">
-        {LEVELS.map((lv) => (
+        {levels.map((lv) => (
           <button key={lv} className={`choice${value === lv ? ' on' : ''}`} disabled={disabled} onClick={() => onChange(lv)} aria-pressed={value === lv}>
             {CARD[seg][lv]}
           </button>
@@ -69,8 +69,7 @@ function WhatIf({ cfg, entry, stage }: { cfg: GameConfig; entry: Entry; stage: S
         <R>{'{同|おな}じ{運|うん}（{乱数|らんすう}）のまま、{間|ま}だけを{変|か}えて{計算|けいさん}しなおす。'}</R>
       </p>
       <CardPicker seg="s1" value={current.s1} onChange={set('s1')} />
-      <CardPicker seg="s2" value={current.s2} onChange={set('s2')} />
-      {stage.cards.s3 && <CardPicker seg="s3" value={current.s3} onChange={set('s3')} />}
+      <CardPicker seg="s3" value={current.s3} onChange={set('s3')} max={stage.cards.s3Long ? 2 : 1} />
       {alt && (
         <div className={`banner ${RESULT[alt.result].tone}`}>
           <b>
@@ -178,7 +177,7 @@ export function BattleScreen() {
     id: `rt${Date.now()}`,
     name: '',
     s1: Math.round(s1 * 1000) / 1000,
-    s2: fromCards(base, cards).s2,
+    s2: base.s2,
     s3: Math.round(Math.max(0, s3) * 1000) / 1000,
     s4: base.s4,
     event,
@@ -188,7 +187,7 @@ export function BattleScreen() {
   const rtSet = () => {
     unlockAudio();
     const setAt = performance.now() + 600;
-    setClock({ setAt, liftAt: null, s2: fromCards(base, cards).s2, forwardAt: null, s4: base.s4 });
+    setClock({ setAt, liftAt: null, s2: base.s2, forwardAt: null, s4: base.s4 });
     setRt('set');
     window.setTimeout(() => sfx.tap(), 600);
     // 長く止まりすぎたら、審判に止められる（遅延）
@@ -213,7 +212,7 @@ export function BattleScreen() {
   const rtUp = (t: number) => {
     if (rt !== 'lifted' || !clock || clock.liftAt == null) return;
     window.clearTimeout(rtTimer.current);
-    // 足が上がりきる前に指をはなしたら、上がりきってすぐ前へ（ため 0）
+    // 足を上げる速さはいつも同じ。上がりきる前に指をはなしたら、上がりきってすぐ前へ（ため 0）
     const forwardAt = Math.max(t, clock.liftAt + clock.s2 * 1000);
     const s1 = (clock.liftAt - clock.setAt) / 1000;
     const s3 = (forwardAt - clock.liftAt) / 1000 - clock.s2;
@@ -402,8 +401,7 @@ export function BattleScreen() {
               {!realtime ? (
                 <div className="controls">
                   <CardPicker seg="s1" value={cards.s1} onChange={(v) => setCards({ ...cards, s1: v })} disabled={phase === 'anim'} />
-                  <CardPicker seg="s2" value={cards.s2} onChange={(v) => setCards({ ...cards, s2: v })} disabled={phase === 'anim'} />
-                  {stage.cards.s3 && <CardPicker seg="s3" value={cards.s3} onChange={(v) => setCards({ ...cards, s3: v })} disabled={phase === 'anim'} />}
+                  <CardPicker seg="s3" value={cards.s3} onChange={(v) => setCards({ ...cards, s3: v })} disabled={phase === 'anim'} max={stage.cards.s3Long ? 2 : 1} />
                   <p className="muted small-text center">
                     <R>{describeDiff(preview, base)}</R>
                   </p>
@@ -442,7 +440,6 @@ export function BattleScreen() {
                 </div>
               ) : (
                 <div className="controls">
-                  <CardPicker seg="s2" value={cards.s2} onChange={(v) => setCards({ ...cards, s2: v })} disabled={phase === 'anim' || rt !== 'idle'} />
                   {rt === 'idle' ? (
                     <button className="primary big rt-button" disabled={phase === 'anim'} onClick={rtSet}>
                       <R>{BUTTONS.set}</R>
@@ -477,7 +474,7 @@ export function BattleScreen() {
                     </div>
                   )}
                   <p className="muted small-text center">
-                    <R>{`「セット！」→ {好|す}きなだけ{止|と}まる → ボタンに{指|ゆび}を{置|お}くと{足|あし}が{上|あ}がる → はなすと{投|な}げる。${anyRunner ? 'ランナーがいる。すぐ{動|うご}くとボーク！' : ''}`}</R>
+                    <R>{`「セット！」→ {好|す}きなだけ{止|と}まる → ボタンに{指|ゆび}を{置|お}くと{足|あし}が{上|あ}がる → {押|お}している{間|あいだ}は「ため」→ はなすと{投|な}げる。${anyRunner ? 'ランナーがいる。すぐ{動|うご}くとボーク！' : ''}`}</R>
                   </p>
                 </div>
               )}

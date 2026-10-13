@@ -2,13 +2,12 @@
 
 import type { BatterType, TimingPattern } from '../../types';
 import { initGame, isBatterOut, throwPitch, type GameConfig } from '../atBat';
-import { DEFAULT_BASELINE, type CardLevel } from '../constants';
+import { CARD_LEVELS, DEFAULT_BASELINE } from '../constants';
 import { createRng, hashSeed, type Rng } from '../rng';
 import { fromCards, liftToRelease, NORMAL_CARDS, type Cards } from '../timing';
 
 export const BASE = { ...DEFAULT_BASELINE };
-const LEVELS: CardLevel[] = [-1, 0, 1];
-export const ALL_CARDS: Cards[] = LEVELS.flatMap((s1) => LEVELS.flatMap((s2) => LEVELS.map((s3) => ({ s1, s2, s3 }))));
+export const ALL_CARDS: Cards[] = CARD_LEVELS.s1.flatMap((s1) => CARD_LEVELS.s3.map((s3) => ({ s1, s3 })));
 
 export const pat = (c: Cards): TimingPattern => fromCards(BASE, c);
 export const NORMAL = pat(NORMAL_CARDS);
@@ -16,18 +15,18 @@ export const NORMAL = pat(NORMAL_CARDS);
 /** 前の球のカード（最初は null）から、次のカードを決める */
 export type Policy = (prev: Cards | null, rng: Rng) => Cards;
 
-const diffCount = (a: Cards, b: Cards) => (['s1', 's2', 's3'] as const).filter((k) => a[k] !== b[k]).length;
+const diffCount = (a: Cards, b: Cards) => (['s1', 's3'] as const).filter((k) => a[k] !== b[k]).length;
 
 export const policies = {
   /** いつも「ふつう」 */
   normal: (): Cards => NORMAL_CARDS,
   /** でたらめに選ぶ */
   random: (_prev: Cards | null, rng: Rng): Cards => rng.pick(ALL_CARDS),
-  /** 毎球、前の球から2区間以上を変える */
+  /** 毎球、前の球から2区間（とまる・ため）とも変える */
   twoSegments: (prev: Cards | null, rng: Rng): Cards => rng.pick(ALL_CARDS.filter((c) => diffCount(c, prev ?? NORMAL_CARDS) >= 2)),
   /** 「ふつう」から1区間だけ変える */
   oneSegment: (_prev: Cards | null, rng: Rng): Cards => {
-    const k = rng.pick(['s1', 's2', 's3'] as const);
+    const k = rng.pick(['s1', 's3'] as const);
     return { ...NORMAL_CARDS, [k]: rng.pick([-1, 1] as const) };
   },
   /** 直前の球と「足上げ〜リリース」を大きく変え、止まる長さも変える */

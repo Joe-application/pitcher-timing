@@ -33,23 +33,24 @@ describe('計測', () => {
 });
 
 describe('計測チャレンジの採点', () => {
-  const longQuick = fromCards(BASE, { s1: 1, s2: -1, s3: -1 });
+  // ながく止まって、ためずにすぐ投げる
+  const longQuick = fromCards(BASE, { s1: 1, s3: -1 });
 
   it('目標どおりなら満点', () => {
-    const s = scoreChallenge(longQuick, { s1: 2.4, s2s3: 0.25, s4: 0.5 }, BASE);
+    const s = scoreChallenge(longQuick, { s1: 2.4, s2s3: 0.4, s4: 0.5 }, BASE);
     expect(s.score).toBe(100);
     expect(s.clear).toBe(true);
   });
 
   it('変えたつもりで「ふつう」のままだと、はっきり差が出ていないと言われる', () => {
-    const s = scoreChallenge(longQuick, { s1: 1.3, s2s3: 0.5, s4: 0.48 }, BASE);
+    const s = scoreChallenge(longQuick, { s1: 1.3, s2s3: 0.55, s4: 0.48 }, BASE);
     expect(s.clear).toBe(false);
     expect(s.score).toBeLessThanOrEqual(50);
     expect(s.parts.find((p) => p.key === 's1')).toMatchObject({ intended: true, clear: false, mark: 'miss' });
   });
 
   it('「ふつう」が目標のときは、変える区間がない', () => {
-    const s = scoreChallenge(fromCards(BASE, { s1: 0, s2: 0, s3: 0 }), { s1: 1.3, s2s3: 0.6, s4: 0.5 }, BASE);
+    const s = scoreChallenge(fromCards(BASE, { s1: 0, s3: 0 }), { s1: 1.3, s2s3: 0.6, s4: 0.5 }, BASE);
     expect(s.parts.every((p) => !p.intended)).toBe(true);
     expect(s.clear).toBe(true);
   });

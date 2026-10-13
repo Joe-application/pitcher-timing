@@ -61,7 +61,7 @@ export type PitchResult =
 export type RunnerEvent = 'steal' | 'caughtStealing';
 
 /** ずらしの種類（振り返り・バッジ・星の判定に使う） */
-export type ShiftKind = 's1Short' | 's1Long' | 's2Quick' | 's2Slow' | 's3Quick' | 's3Hold' | 'pickoff' | 'stepOff';
+export type ShiftKind = 's1Short' | 's1Long' | 's3Quick' | 's3Hold' | 's3Long' | 'pickoff' | 'stepOff';
 
 export interface PitchRecord {
   stageId: string;
