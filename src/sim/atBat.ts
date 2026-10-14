@@ -4,7 +4,7 @@
 import type { Bases, BatterSpot, Cell, PitchRecord, PitchResult, RuleWarning, RunnerEvent, Seconds, TimingPattern, ZoneKind } from '../types';
 import { gradeOf, initBatter, resetBatter, streakWith, swingChance, swingResult, swingTiming, updateBatter, type BatterState } from './batter';
 import { LOCATION, PITCH, RULES, RUNNER } from './constants';
-import { actualCell, contactMod, isStrike, NO_MOD, sameCell, swingAdjust, timingShift, zoneKind } from './location';
+import { actualCell, contactMod, isFarBall, isStrike, NO_MOD, sameCell, swingAdjust, timingShift, zoneKind } from './location';
 import { createRng, hashSeed } from './rng';
 import { initRunner, pickoffOutChance, resetRunner, stealSuccessChance, stealTryChance, updateRunner, type RunnerState } from './runner';
 import { checkRules, shiftKinds, type Segments } from './timing';
@@ -276,7 +276,10 @@ export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern, aim?
     const grade = gradeOf(error);
     timingErrorMs = Math.round(error * 1000);
     timing = grade;
-    swung = human ? human.swung : d.swing < swingChance(batter.type, inZone, balls, strikes, grade, zoneSwing);
+    let chance = swingChance(batter.type, inZone, balls, strikes, grade, zoneSwing);
+    // はっきりしたボールには、ほとんど手を出さない
+    if (location && isFarBall(location)) chance *= LOCATION.FAR_BALL_SWING;
+    swung = human ? human.swung : d.swing < chance;
 
     if (swung) result = swingResult(batter.type, grade, inZone, p.s3, d.contact, mod);
     else result = inZone ? 'take' : 'ball';

@@ -1192,7 +1192,15 @@ select {
 }
 .zone-cell.ball {
   fill: var(--btn);
+  /* 打者の体と重なるところも見えるように、少し透かす */
+  fill-opacity: 0.45;
   stroke-dasharray: 3 2;
+}
+/* 外側の1周＝はっきりしたボール */
+.zone-cell.ball.far {
+  fill: transparent;
+  stroke: var(--muted);
+  stroke-opacity: 0.55;
 }
 .zone-cell.hot {
   fill: #fca5a5;

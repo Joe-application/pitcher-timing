@@ -65,7 +65,7 @@ function Figure({ kind }: { kind: NonNullable<TutorialPage['figure']> }) {
     case 'zone':
       return (
         <div className="tut-figure tut-zone">
-          <ZonePicker spot={{ type: 'slugger', hand: 'R', order: 4 }} aim={{ x: 1, y: 4 }} disabled />
+          <ZonePicker spot={{ type: 'slugger', hand: 'R', order: 4 }} aim={{ x: 2, y: 5 }} disabled />
           <ZoneLegend />
           <p className="small-text muted">
             <R>{ZONE.note}</R>

@@ -39,8 +39,8 @@ export type BatterType = 'straight' | 'hasty' | 'patient' | 'slugger' | 'boss';
 /** 右打ち・左打ち */
 export type Hand = 'R' | 'L';
 
-/** 投げるコースと高さのマス（5×5）。投手から見て x = 0 が左（一塁側）〜 4 が右（三塁側）、y = 0 が高め 〜 4 が低め。
- * 内側の 3×3（1〜3）がストライクゾーン */
+/** 投げるコースと高さのマス（7×7）。投手から見て x = 0 が左（一塁側）〜 6 が右（三塁側）、y = 0 が高め 〜 6 が低め。
+ * まん中の 3×3（2〜4）がストライクゾーン、まわりの2周がボールゾーン */
 export interface Cell {
   x: number;
   y: number;

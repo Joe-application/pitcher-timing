@@ -40,7 +40,8 @@ function cpuChoice(kind: PitcherKind, prev: Cards | null): { cards: Cards; aim: 
   const cards: Cards = same ? prev : { s1: pick(CARD_LEVELS.s1), s2: pick(CARD_LEVELS.s2), s3: pick(CARD_LEVELS.s3) };
   // ほとんどはストライクゾーン、ときどきボールゾーン
   const ball = Math.random() < (kind === 'cpuEasy' ? 0.15 : 0.3);
-  const aim = ball ? { x: pick([0, 4]), y: pick([0, 1, 2, 3, 4]) } : { x: pick([1, 2, 3]), y: pick([1, 2, 3]) };
+  // ボール球は、ゾーンのすぐ外（きわどいところ）へ
+  const aim = ball ? pick([{ x: pick([1, 5]), y: pick([1, 2, 3, 4, 5]) }, { x: pick([2, 3, 4]), y: pick([1, 5]) }]) : { x: pick([2, 3, 4]), y: pick([2, 3, 4]) };
   return { cards, aim };
 }
 

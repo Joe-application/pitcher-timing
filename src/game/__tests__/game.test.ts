@@ -39,10 +39,10 @@ describe('ステージ', () => {
     expect(st.situation).toMatchObject({ outs: 1, bases: [false, true, false], scoreDiff: 0, score: [4, 4] });
     expect(st.lineup[0]).toMatchObject({ type: 'boss', order: 3, hand: 'L', height: 165, hot: ['out-high', 'mid-mid', 'mid-low'] });
     // 左打者の外角は、投手から見て右側。外角高めは得意、外角低めは苦手
-    expect(zoneKind(st.lineup[0], { x: 3, y: 1 })).toBe('hot');
-    expect(zoneKind(st.lineup[0], { x: 3, y: 3 })).toBe('cold');
-    expect(zoneKind(st.lineup[0], { x: 1, y: 1 })).toBe('cold');
-    expect(zoneKind(st.lineup[0], { x: 2, y: 3 })).toBe('hot');
+    expect(zoneKind(st.lineup[0], { x: 4, y: 2 })).toBe('hot');
+    expect(zoneKind(st.lineup[0], { x: 4, y: 4 })).toBe('cold');
+    expect(zoneKind(st.lineup[0], { x: 2, y: 2 })).toBe('cold');
+    expect(zoneKind(st.lineup[0], { x: 3, y: 4 })).toBe('hot');
     expect(st.maxRuns).toBe(0);
     expect(st.lineup.length).toBeGreaterThanOrEqual(2);
   });

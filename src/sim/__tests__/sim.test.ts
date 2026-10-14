@@ -5,7 +5,7 @@ import { gradeOf, initBatter, liftWeight, resetBatter, swingTiming, updateBatter
 import { BATTER_MODEL, BATTERS, DEFAULT_BASELINE, RULES, RUNNER } from '../constants';
 import { initRunner, pickoffOutChance, stealSuccessChance } from '../runner';
 import { baselineOf, changedSegments, fromCards, liftToRelease, marks, sameRhythm, shiftKinds } from '../timing';
-import { actualCell, colOf, GRID, isStrike, rowOf, zoneKind } from '../location';
+import { actualCell, colOf, GRID, isFarBall, isStrike, rowOf, zoneKind } from '../location';
 import { ALL_CARDS, BASE, config, NORMAL, pat, policies, simulateAtBats, spot } from './helpers';
 
 describe('区間の計算', () => {
@@ -263,35 +263,42 @@ describe('打席の進行', () => {
 describe('コースと高さ', () => {
   const cells = Array.from({ length: GRID * GRID }, (_, i) => ({ x: i % GRID, y: Math.floor(i / GRID) }));
 
-  it('ストライクゾーンは9マス、まわりのボールゾーンは16マス', () => {
+  it('ストライクゾーンは9マス、まわりのボールゾーンは2周で40マス（内側16・外側24）', () => {
     expect(cells.filter(isStrike).length).toBe(9);
-    expect(cells.filter((c) => !isStrike(c)).length).toBe(16);
-    expect(cells.filter((c) => zoneKind(spot('slugger'), c) === 'ball').length).toBe(16);
+    expect(cells.filter((c) => !isStrike(c)).length).toBe(40);
+    expect(cells.filter(isFarBall).length).toBe(24);
+    expect(cells.filter((c) => zoneKind(spot('slugger'), c) === 'ball').length).toBe(40);
+    // ボールゾーンも、内角側・外角側、高め・低めに分かれる
+    expect(colOf({ x: 0, y: 3 }, 'R')).toBe('out');
+    expect(colOf({ x: 6, y: 3 }, 'R')).toBe('in');
+    expect(rowOf({ x: 3, y: 0 })).toBe('high');
+    expect(rowOf({ x: 3, y: 6 })).toBe('low');
   });
 
   it('右打者は投手から見て右に立つので、内角は右側。左打者は逆', () => {
-    expect(colOf({ x: 3, y: 2 }, 'R')).toBe('in');
-    expect(colOf({ x: 1, y: 2 }, 'R')).toBe('out');
-    expect(colOf({ x: 3, y: 2 }, 'L')).toBe('out');
-    expect(colOf({ x: 1, y: 2 }, 'L')).toBe('in');
-    expect(rowOf({ x: 2, y: 1 })).toBe('high');
-    expect(rowOf({ x: 2, y: 3 })).toBe('low');
+    expect(colOf({ x: 4, y: 3 }, 'R')).toBe('in');
+    expect(colOf({ x: 2, y: 3 }, 'R')).toBe('out');
+    expect(colOf({ x: 4, y: 3 }, 'L')).toBe('out');
+    expect(colOf({ x: 2, y: 3 }, 'L')).toBe('in');
+    expect(rowOf({ x: 3, y: 2 })).toBe('high');
+    expect(rowOf({ x: 3, y: 4 })).toBe('low');
     // 強打者は外角低めが苦手、ど真ん中が得意。左右で場所が入れかわる
-    expect(zoneKind({ type: 'slugger', hand: 'R', order: 4 }, { x: 1, y: 3 })).toBe('cold');
-    expect(zoneKind({ type: 'slugger', hand: 'L', order: 4 }, { x: 3, y: 3 })).toBe('cold');
-    expect(zoneKind({ type: 'slugger', hand: 'R', order: 4 }, { x: 2, y: 2 })).toBe('hot');
+    expect(zoneKind({ type: 'slugger', hand: 'R', order: 4 }, { x: 2, y: 4 })).toBe('cold');
+    expect(zoneKind({ type: 'slugger', hand: 'L', order: 4 }, { x: 4, y: 4 })).toBe('cold');
+    expect(zoneKind({ type: 'slugger', hand: 'R', order: 4 }, { x: 3, y: 3 })).toBe('hot');
     // 打者ごとに上書きできる
-    expect(zoneKind({ type: 'slugger', hand: 'R', order: 4, hot: ['out-low'], cold: [] }, { x: 1, y: 3 })).toBe('hot');
+    expect(zoneKind({ type: 'slugger', hand: 'R', order: 4, hot: ['out-low'], cold: [] }, { x: 2, y: 4 })).toBe('hot');
   });
 
   it('ねらいどおりか、となり（まれに2マス先）に外れる。マスの外には出ない', () => {
-    const aim = { x: 1, y: 3 };
+    const aim = { x: 2, y: 4 };
     expect(actualCell(aim, 0.7, 0.5, 0.3)).toEqual(aim);
     for (let i = 0; i < 200; i++) {
-      const c = actualCell({ x: 0, y: 4 }, 0.7, 0.7 + (0.3 * i) / 200, (i * 37) % 100 / 100);
+      const corner = { x: 0, y: 6 };
+      const c = actualCell(corner, 0.7, 0.7 + (0.3 * i) / 200, (i * 37) % 100 / 100);
       expect(c.x).toBeGreaterThanOrEqual(0);
-      expect(c.y).toBeLessThanOrEqual(4);
-      expect(Math.max(Math.abs(c.x - 0), Math.abs(c.y - 4))).toBeLessThanOrEqual(2);
+      expect(c.y).toBeLessThanOrEqual(6);
+      expect(Math.max(Math.abs(c.x - corner.x), Math.abs(c.y - corner.y))).toBeLessThanOrEqual(2);
     }
   });
 
@@ -302,25 +309,40 @@ describe('コースと高さ', () => {
   };
 
   it('得意なコースは打たれ、苦手なコースは打ち取りやすい（リズムは「ふつう」のまま）', () => {
-    const hot = rate('slugger', { x: 2, y: 2 }, '強打者 × ど真ん中（得意）');
-    const cold = rate('slugger', { x: 1, y: 3 }, '強打者 × 外角低め（苦手）');
+    const hot = rate('slugger', { x: 3, y: 3 }, '強打者 × ど真ん中（得意）');
+    const cold = rate('slugger', { x: 2, y: 4 }, '強打者 × 外角低め（苦手）');
     expect(cold.outRate).toBeGreaterThan(hot.outRate + 0.1);
     expect(cold.longRate).toBeLessThan(hot.longRate);
-    const bossHot = rate('boss', { x: 2, y: 2 }, 'ボス × ど真ん中（得意）');
-    const bossCold = rate('boss', { x: 1, y: 3 }, 'ボス × 外角低め（苦手）');
+    const bossHot = rate('boss', { x: 3, y: 3 }, 'ボス × ど真ん中（得意）');
+    const bossCold = rate('boss', { x: 2, y: 4 }, 'ボス × 外角低め（苦手）');
     expect(bossCold.outRate).toBeGreaterThan(bossHot.outRate);
   });
 
+  it('はっきりしたボール（外側の1周）は、きわどいボールより振ってもらえない', () => {
+    const swings = (aim: { x: number; y: number }) => {
+      let n = 0;
+      for (let seed = 1; seed <= 2000; seed++) {
+        const cfg = config(['straight'], seed, { strikeRate: 1 });
+        if (throwPitch(cfg, initGame(cfg), NORMAL, aim).record.swung) n++;
+      }
+      return n / 2000;
+    };
+    const near = swings({ x: 1, y: 3 });
+    const far = swings({ x: 0, y: 3 });
+    expect(near).toBeGreaterThan(0.1);
+    expect(far).toBeLessThan(near / 2);
+  });
+
   it('ボールゾーンばかりねらうと四球が増える', () => {
-    const ball = rate('straight', { x: 0, y: 4 }, 'まっすぐ待ち × 外角低めのボール');
-    const strike = rate('straight', { x: 1, y: 3 }, 'まっすぐ待ち × 外角低め');
+    const ball = rate('straight', { x: 1, y: 5 }, 'まっすぐ待ち × 外角低めのボール');
+    const strike = rate('straight', { x: 2, y: 4 }, 'まっすぐ待ち × 外角低め');
     expect(ball.walkRate).toBeGreaterThan(strike.walkRate + 0.2);
   });
 
   it('同じマスが続くと記録され、打席が変わるとリセットされる', () => {
     const cfg = config(['straight', 'straight'], 3, { strikeRate: 1 });
     let s = initGame(cfg);
-    const aim = { x: 2, y: 3 };
+    const aim = { x: 3, y: 4 };
     const a = throwPitch(cfg, s, NORMAL, aim);
     expect(a.record.location).toEqual(aim);
     expect(a.record.sameSpot).toBe(false);
@@ -336,14 +358,14 @@ describe('対戦モード（人が打者）', () => {
   it('人のタイミングで結果が決まる：ぴったりなら当たり、大きくずれたら空振り、振らなければ見送り', () => {
     const cfg = config(['straight'], 9, { strikeRate: 1 });
     const s = initGame(cfg);
-    const aim = { x: 2, y: 2 };
+    const aim = { x: 3, y: 3 };
     const miss = throwPitch(cfg, s, NORMAL, aim, { swung: true, errorMs: 250 }).record;
     expect(miss.result).toBe('swingMiss');
     expect(miss.timingErrorMs).toBe(250);
     expect(miss.timing).toBe('broken');
     const take = throwPitch(cfg, s, NORMAL, aim, { swung: false, errorMs: 0 }).record;
     expect(take.result).toBe('take');
-    expect(throwPitch(cfg, s, NORMAL, { x: 0, y: 0 }, { swung: false, errorMs: 0 }).record.result).toBe('ball');
+    expect(throwPitch(cfg, s, NORMAL, { x: 1, y: 1 }, { swung: false, errorMs: 0 }).record.result).toBe('ball');
     let contact = 0;
     for (let seed = 1; seed <= 200; seed++) {
       const c = config(['straight'], seed, { strikeRate: 1 });
@@ -357,8 +379,8 @@ describe('対戦モード（人が打者）', () => {
   it('ボールが行く場所は、振る・振らないに関係なく同じ（投げる前に計算しておける）', () => {
     const cfg = config(['straight'], 4);
     const s = initGame(cfg);
-    const a = throwPitch(cfg, s, NORMAL, { x: 1, y: 3 }, { swung: false, errorMs: 0 }).record.location;
-    const b = throwPitch(cfg, s, NORMAL, { x: 1, y: 3 }, { swung: true, errorMs: -90 }).record.location;
+    const a = throwPitch(cfg, s, NORMAL, { x: 2, y: 4 }, { swung: false, errorMs: 0 }).record.location;
+    const b = throwPitch(cfg, s, NORMAL, { x: 2, y: 4 }, { swung: true, errorMs: -90 }).record.location;
     expect(a).toEqual(b);
   });
 });
