@@ -1,9 +1,9 @@
 // 走者・牽制モデル（§4.5）。走者は投手の「とまる（S1）」の長さを予想し、
 // 足上げ開始に合わせてスタートを切る。純粋関数のみ。
 
-import type { Seconds } from '../types';
-import { RUNNER } from './constants';
-import { liftToRelease, type Segments } from './timing';
+import type { PickoffBase, PickoffMove, PitchType, Seconds } from '../types';
+import { PITCH, RUNNER } from './constants';
+import { flightOf, liftToRelease, type Segments } from './timing';
 
 export interface RunnerState {
   /** 走者が予想している S1（次に足を上げる時刻） */
@@ -28,12 +28,13 @@ export function stealTryChance(r: RunnerState): number {
  * @param z 標準正規分布の乱数（スタートのばらつき）
  * @param toThird 三盗か
  */
-export function stealSuccessChance(r: RunnerState, p: Segments, base: Segments, z: number, toThird = false): number {
+export function stealSuccessChance(r: RunnerState, p: Segments & { pitchType?: PitchType }, base: Segments, z: number, toThird = false): number {
   // 走者のスタートのずれ（予想より早く足が上がると出遅れ、遅いと体が止まる）
   const miss = Math.abs(p.s1 - r.expS1 + z * RUNNER.jumpSigma);
   let s = RUNNER.successGoodJump - RUNNER.successDropPerSecond * Math.max(0, miss - RUNNER.goodJumpWindow);
   // クイックや、ためずにすぐ投げると、そのぶん走者は間に合わない（ゆっくり・ためると走られやすい）
-  s += RUNNER.successPerDeliverySecond * (liftToRelease(p) - liftToRelease(base));
+  // スローボールも、届くのがおそいぶん走られやすい
+  s += RUNNER.successPerDeliverySecond * (liftToRelease(p) - liftToRelease(base) + flightOf(p) - PITCH.BALL_FLIGHT);
   if (toThird) s *= RUNNER.stealThirdFactor;
   return Math.min(0.97, Math.max(RUNNER.successMin, s));
 }
@@ -41,12 +42,16 @@ export function stealSuccessChance(r: RunnerState, p: Segments, base: Segments, 
 /**
  * 牽制でアウトにできる確率。走者が「そろそろ足が上がる」と思って
  * リードを大きく取っている瞬間（予想した足上げ時刻）に近いほど高い。
- * @param t セット完了から牽制するまでの時間
+ * @param t セット完了から牽制の動きを始めるまでの時間
+ * @param base 牽制する塁
+ * @param move 一塁牽制のやり方（足を上げる・クイック）
  */
-export function pickoffOutChance(r: RunnerState, t: Seconds): number {
+export function pickoffOutChance(r: RunnerState, t: Seconds, base: PickoffBase = 1, move: PickoffMove = 'quick'): number {
   const d = (t - r.expS1) / RUNNER.pickoffWindow;
   const p = RUNNER.pickoffMin + (RUNNER.pickoffMax - RUNNER.pickoffMin) * Math.exp(-d * d);
-  return clamp01(p * (r.cautious ? 0.5 : 1));
+  const f = RUNNER.pickoffFactor;
+  const factor = base === 1 ? (move === 'lift' ? f.firstLift : f.firstQuick) : base === 2 ? f.second : f.third;
+  return clamp01(p * factor * (r.cautious ? 0.5 : 1));
 }
 
 /** 投球を見たあとの走者の予想の更新 */

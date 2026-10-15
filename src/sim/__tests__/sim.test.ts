@@ -4,7 +4,7 @@ import { initGame, isBatterOut, isCleared, isFailed, stealingRunner, throwPitch 
 import { gradeOf, initBatter, liftWeight, resetBatter, swingTiming, updateBatter } from '../batter';
 import { BATTER_MODEL, BATTERS, DEFAULT_BASELINE, RULES, RUNNER } from '../constants';
 import { initRunner, pickoffOutChance, stealSuccessChance } from '../runner';
-import { baselineOf, changedSegments, fromCards, liftToRelease, marks, sameRhythm, shiftKinds } from '../timing';
+import { baselineOf, changedSegments, flightOf, fromCards, liftToRelease, marks, sameRhythm, shiftKinds } from '../timing';
 import { actualCell, colOf, GRID, isFarBall, isStrike, rowOf, zoneKind } from '../location';
 import { ALL_CARDS, BASE, config, NORMAL, pat, policies, simulateAtBats, spot } from './helpers';
 
@@ -235,8 +235,10 @@ describe('打席の進行', () => {
         expect(o.state.outs).toBe(1);
       } else expect(o.record.result).toBe('pickoffSafe');
     }
-    expect(got / 300).toBeGreaterThan(RUNNER.pickoffMax - 0.08);
-    expect(got / 300).toBeLessThan(RUNNER.pickoffMax + 0.08);
+    // 二塁への牽制は、ふつう（一塁クイック）より刺しにくい
+    const want = RUNNER.pickoffMax * RUNNER.pickoffFactor.second;
+    expect(got / 300).toBeGreaterThan(want - 0.07);
+    expect(got / 300).toBeLessThan(want + 0.07);
   });
 
   it('長く止まりすぎは遅延でボール、クリアと失敗の判定', () => {
@@ -382,5 +384,84 @@ describe('対戦モード（人が打者）', () => {
     const a = throwPitch(cfg, s, NORMAL, { x: 2, y: 4 }, { swung: false, errorMs: 0 }).record.location;
     const b = throwPitch(cfg, s, NORMAL, { x: 2, y: 4 }, { swung: true, errorMs: -90 }).record.location;
     expect(a).toEqual(b);
+  });
+});
+
+describe('牽制（左投手）', () => {
+  const pickoff = (base: 1 | 2 | 3, move: 'lift' | 'quick' = 'quick') => ({ ...fromCards(BASE, { s1: 0, s2: 0, s3: 0 }, 'pickoff'), pickoffBase: base, pickoffMove: move });
+  const outRate = (base: 1 | 2 | 3, move: 'lift' | 'quick', bases: [boolean, boolean, boolean]) => {
+    let out = 0;
+    for (let seed = 1; seed <= 3000; seed++) {
+      const cfg = config(['straight'], seed);
+      const o = throwPitch(cfg, initGame(cfg, { bases }), pickoff(base, move));
+      if (o.record.result === 'pickoffOut') {
+        out++;
+        expect(o.state.bases[base - 1]).toBe(false);
+      }
+    }
+    return out / 3000;
+  };
+
+  it('一塁は足を上げる牽制がいちばん刺しやすく、二塁・三塁は刺しにくい', () => {
+    const lift = outRate(1, 'lift', [true, false, false]);
+    const quick = outRate(1, 'quick', [true, false, false]);
+    const second = outRate(2, 'quick', [false, true, false]);
+    const third = outRate(3, 'quick', [false, false, true]);
+    console.log(`牽制アウト率：一塁（足を上げる）${(lift * 100).toFixed(0)}% / 一塁（クイック）${(quick * 100).toFixed(0)}% / 二塁 ${(second * 100).toFixed(0)}% / 三塁 ${(third * 100).toFixed(0)}%`);
+    expect(lift).toBeGreaterThan(quick);
+    expect(quick).toBeGreaterThan(second);
+    expect(second).toBeGreaterThan(third);
+  });
+
+  it('選んだ塁に牽制する（満塁なら三塁にも投げられる）', () => {
+    const cfg = config(['straight'], 2);
+    for (let seed = 1; seed <= 300; seed++) {
+      const c = config(['straight'], seed);
+      const o = throwPitch(c, initGame(c, { bases: [true, true, true] }), pickoff(3));
+      if (o.record.result === 'pickoffOut') {
+        expect(o.state.bases).toEqual([true, true, false]);
+        return;
+      }
+    }
+    void cfg;
+    throw new Error('三塁牽制でアウトにならなかった');
+  });
+
+  it('牽制のあとの1球は、打者のリズムがくずれる（予想が仕切り直しになり、ばらつきが増える）', () => {
+    const cfg = config(['slugger'], 5);
+    let s = initGame(cfg, { bases: [true, false, false] });
+    // 同じ「ゆっくり」を2球見せて、打者に合わせさせる
+    const slow = pat({ s1: 0, s2: 1, s3: 1 });
+    s = throwPitch(cfg, s, slow, { x: 3, y: 3 }).state;
+    if (s.atBatPitches === 0) return;
+    const before = s.batter;
+    const after = throwPitch(cfg, s, pickoff(1)).state.batter;
+    expect(after.unsettled).toBe(true);
+    expect(Math.abs(after.expLtr - liftToRelease(BASE))).toBeLessThan(Math.abs(before.expLtr - liftToRelease(BASE)));
+    // 次に投げたら、集中は戻る
+    const next = throwPitch(cfg, { ...s, batter: after }, NORMAL, { x: 3, y: 3 }).state.batter;
+    expect(next.unsettled ?? false).toBe(false);
+  });
+});
+
+describe('球種（ストレート・スローボール）', () => {
+  const slow = { ...NORMAL, pitchType: 'slow' as const };
+
+  it('スローボールは届くのがおそい', () => {
+    expect(flightOf(slow)).toBeGreaterThan(flightOf(NORMAL) + 0.2);
+  });
+
+  it('ストレートを待っている打者は、スローボールで早く振ってしまう。続けると慣れられ、そのあとのストレートには振りおくれる', () => {
+    let b = initBatter('straight', BASE);
+    const first = swingTiming(b, slow, 0).error;
+    expect(first).toBeGreaterThan(0.1);
+    for (let i = 0; i < 4; i++) b = updateBatter(b, slow);
+    expect(swingTiming(b, slow, 0).error).toBeLessThan(first / 2);
+    expect(swingTiming(b, NORMAL, 0).error).toBeLessThan(-0.05);
+  });
+
+  it('スローボールのときは走られやすい', () => {
+    const r = initRunner(BASE);
+    expect(stealSuccessChance(r, slow, BASE, 0)).toBeGreaterThan(stealSuccessChance(r, NORMAL, BASE, 0));
   });
 });

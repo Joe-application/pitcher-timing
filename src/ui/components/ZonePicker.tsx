@@ -3,6 +3,7 @@
 // 打者はバットを構えたシルエットで、ゾーンの横（右打者は右、左打者は左）に、ゾーンの方を向いて立つ。
 // そのまわりの2周（40マス）がボールゾーン。
 
+import { useEffect, useState } from 'react';
 import { ZONE } from '../../game/messages';
 import { GRID, isFarBall, isStrike, sameCell, ZONE_MAX, ZONE_MIN, zoneKind } from '../../sim/location';
 import type { BatterSpot, Cell } from '../../types';
@@ -36,6 +37,8 @@ interface Props {
   /** 直前の球が実際に行ったマス */
   last?: Cell | null;
   disabled?: boolean;
+  /** 投球中：リリースからホームベースまで、ボールが行き先のマスへ飛んでくる様子を見せる（打者がコースを見きわめる用） */
+  incoming?: { releaseAt: number; plateAt: number; cell: Cell } | null;
 }
 
 /**
@@ -70,7 +73,22 @@ function BatterSilhouette({ x, hand }: { x: number; hand: 'R' | 'L' }) {
   );
 }
 
-export function ZonePicker({ spot, aim, onAim, last, disabled }: Props) {
+/** 飛んでくるボールのための時計 */
+function useFrame(active: boolean): number {
+  const [now, setNow] = useState(() => performance.now());
+  useEffect(() => {
+    if (!active) return;
+    let id = requestAnimationFrame(function tick(t) {
+      setNow(t);
+      id = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [active]);
+  return now;
+}
+
+export function ZonePicker({ spot, aim, onAim, last, disabled, incoming }: Props) {
+  const now = useFrame(!!incoming);
   // 右打者は投手から見て右に立つ。マスはその反対側に寄せる
   const right = spot.hand === 'R';
   const gridX = right ? 8 : W - 8 - CW * GRID;
@@ -119,6 +137,14 @@ export function ZonePicker({ spot, aim, onAim, last, disabled }: Props) {
         })}
         {/* ストライクゾーンの枠 */}
         <rect x={gridX + CW * ZONE_MIN} y={ZONE_TOP} width={CW * 3} height={SIZE * 3} fill="none" stroke="var(--fg)" strokeWidth="2.5" pointerEvents="none" />
+        {incoming && now >= incoming.releaseAt && (() => {
+          // 遠く（ゾーンのまん中の奥）から、行き先のマスへ大きくなりながら飛んでくる
+          const k = Math.min(1, (now - incoming.releaseAt) / (incoming.plateAt - incoming.releaseAt));
+          const g = k * k;
+          const fromX = gridX + (CW * GRID) / 2;
+          const fromY = TOP + (SIZE * GRID) / 2;
+          return <circle cx={fromX + (cx(incoming.cell) - fromX) * g} cy={fromY + (cy(incoming.cell) - fromY) * g} r={1.5 + 6 * g} fill="#fff" stroke="#b91c1c" strokeWidth={0.8 + 1.4 * g} pointerEvents="none" />;
+        })()}
         {last && <circle cx={cx(last)} cy={cy(last)} r="5.5" fill="#fff" stroke="#b91c1c" strokeWidth="2" pointerEvents="none" opacity={isStrike(last) ? 1 : 0.85} />}
         {aim && (
           <g pointerEvents="none">

@@ -1453,12 +1453,12 @@ select {
   width: 100%;
 }
 .versus-incoming {
-  max-width: 190px;
+  max-width: 270px;
   margin: 0 auto;
 }
 .swing-button {
   width: 100%;
-  min-height: 30dvh;
+  min-height: 22dvh;
   font-size: clamp(2rem, 9vw, 3.4rem);
   border-radius: 24px;
   background: var(--stop);
@@ -1479,4 +1479,26 @@ select {
   text-align: left;
   max-width: 520px;
   margin: 8px auto;
+}
+
+/* ---------- 牽制 ---------- */
+.pickoff-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  margin: 4px 0;
+}
+.pickoff-label {
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+.pickoff {
+  border-color: var(--ok);
+}
+
+.card-row.ptype .card-row-name {
+  background: var(--ok);
+  font-size: 0.82rem;
 }

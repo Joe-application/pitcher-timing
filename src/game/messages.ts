@@ -6,7 +6,7 @@ import { BATTER_MODEL, PITCH, RULES } from '../sim/constants';
 import type { CardKey, CardLevel } from '../sim/constants';
 import type { Segments } from '../sim/timing';
 import { colOf, isStrike, rowOf } from '../sim/location';
-import type { BatterSpot, BatterType, Cell, Hand, ZoneSpot, PitchRecord, PitchResult, RuleWarning, SegmentKey, ShiftKind, TimingGrade } from '../types';
+import type { BatterSpot, BatterType, Cell, Hand, PickoffBase, PickoffMove, PitchType, ZoneSpot, PitchRecord, PitchResult, RuleWarning, SegmentKey, ShiftKind, TimingGrade } from '../types';
 
 export const APP_TITLE = 'タイミング{外|はず}しピッチャー';
 export const APP_TITLE_PLAIN = 'タイミング外しピッチャー';
@@ -26,6 +26,10 @@ export const CARD: Record<CardKey, Partial<Record<CardLevel, string>>> = {
   s3: { [-1]: 'すぐ', 0: 'ふつう', 1: 'ためる', 2: 'ながくためる' },
 };
 
+/** 球種 */
+export const PITCH_TYPE: Record<PitchType, string> = { straight: 'ストレート', slow: 'スローボール' };
+export const PITCH_TYPE_LABEL = '{球種|きゅうしゅ}';
+
 export const KIND: Record<ShiftKind, string> = {
   s1Short: 'みじかく{止|と}まる',
   s1Long: '{長|なが}く{止|と}まる',
@@ -34,6 +38,7 @@ export const KIND: Record<ShiftKind, string> = {
   s3Quick: 'ためずにすぐ',
   s3Hold: 'ため',
   s3Long: '{長|なが}いため',
+  slowBall: 'スローボール',
   pickoff: 'けんせい',
   stepOff: 'プレートを{外|はず}す',
 };
@@ -207,7 +212,8 @@ export const RULE_NOTE = '{所属|しょぞく}チーム・{連盟|れんめい}
 // ---- 監督のひとこと ----
 
 /** 投げる前のひとこと（同じリズムが続いているときの注意など） */
-export function preHint(streak: number, type: BatterType, balls = 0, strikes = 0): string {
+export function preHint(streak: number, type: BatterType, balls = 0, strikes = 0, unsettled = false): string {
+  if (unsettled) return PICKOFF.afterHint;
   if (streak >= 2) return `👀 {同|おな}じリズムが${streak}{球|きゅう}{続|つづ}いた。{読|よ}まれているぞ！`;
   if (strikes === 2 && balls <= 1) return '💡 {追|お}いこんだ！ボールゾーンをねらって{振|ふ}らせるのもいい。ど{真|ま}ん{中|なか}はもったいない。';
   if (balls === 3) return '💡 ボールが3つ。ストライクゾーンの、{苦手|にがて}なコースで{勝負|しょうぶ}だ。';
@@ -312,7 +318,7 @@ export const TUTORIAL: TutorialPage[] = [
   {
     title: '{前|まえ}の{球|たま}と{変|か}える',
     body: [
-      'ずらす{場所|ばしょ}は1つじゃない。セットで{止|と}まる{長|なが}さ、{足|あし}を{上|あ}げる{速|はや}さ、{足|あし}を{上|あ}げて{止|と}める{長|なが}さ（ため）、そして、けんせい。',
+      'ずらす{場所|ばしょ}は1つじゃない。セットで{止|と}まる{長|なが}さ、{足|あし}を{上|あ}げる{速|はや}さ、{足|あし}を{上|あ}げて{止|と}める{長|なが}さ（ため）、そして、けんせい。けんせいで{間|ま}をあけると、ランナーだけでなくバッターのリズムもくずせる。',
       '{大事|だいじ}なのは{組|く}み{合|あ}わせと{順番|じゅんばん}。「{長|なが}く{止|と}まる → クイックですぐ」のように、{前|まえ}の{球|たま}と{比|くら}べて{変|か}えよう。',
     ],
     figure: 'mix',
@@ -390,7 +396,8 @@ export const VERSUS = {
   rounds: '{何回|なんかい}{打|う}つ？（1{回|かい}＝3アウトまで）',
   howTo: 'コンピューターがピッチャーなら、1{人|ひとり}でバッティングの{練習|れんしゅう}ができる。「やさしい」は{同|おな}じリズムが{多|おお}く、「むずかしい」は{毎球|まいきゅう}リズムを{変|か}えてくる。',
   decided: '{決|き}めた！バッターに{画面|がめん}を{見|み}せる',
-  batterHow: 'ピッチャーの{動|うご}きを{見|み}て、ボールがホームベースに{来|く}る{瞬間|しゅんかん}に「{振|ふ}る！」を{押|お}そう。ボール{球|だま}だと{思|おも}ったら{押|お}さない。',
+  batterHow: 'ピッチャーの{動|うご}きを{見|み}て、ボールがホームベースに{来|く}る{瞬間|しゅんかん}に「{振|ふ}る！」を{押|お}そう。{下|した}の{図|ず}にボールが{飛|と}んでくるので、ボール{球|だま}だと{思|おも}ったら{押|お}さない。スローボールにも{気|き}をつけて。',
+  viewNote: 'ピッチャーの{方|ほう}から{見|み}た{図|ず}：ボールがどこに{来|く}るか{見|み}きわめよう',
   ready: 'かまえた！',
   swing: '{振|ふ}る！',
   nextPitch: '{次|つぎ}の{球|たま}へ',
@@ -411,4 +418,26 @@ export const VERSUS = {
     extraBase: '{長打|ちょうだ}！',
     homeRun: 'ホームラン！！',
   } as Partial<Record<PitchResult, string>>,
+};
+
+// ---- 牽制（投手は左投げ） ----
+
+const BASE_NAME: Record<PickoffBase, string> = { 1: '{一塁|いちるい}', 2: '{二塁|にるい}', 3: '{三塁|さんるい}' };
+
+export const PICKOFF = {
+  label: '👉 けんせい',
+  /** ボタンの文字 */
+  button(base: PickoffBase, move: PickoffMove): string {
+    if (base === 1) return move === 'lift' ? '{一塁|いちるい}（{足|あし}を{上|あ}げて）' : '{一塁|いちるい}（クイック）';
+    return BASE_NAME[base];
+  },
+  /** 結果に出す文字（例：一塁けんせい・足を上げて） */
+  name(base: PickoffBase, move: PickoffMove): string {
+    return `${BASE_NAME[base]}けんせい${base === 1 ? (move === 'lift' ? '・{足|あし}を{上|あ}げて' : '・クイック') : ''}`;
+  },
+  /** シーンの上に出す文字（ふりがななし） */
+  scene: { 1: 'ファースト けんせい！', 2: 'セカンド けんせい！', 3: 'サード けんせい！' } as Record<PickoffBase, string>,
+  note: '{左|ひだり}ピッチャーは{一塁|いちるい}ランナーと{向|む}き{合|あ}っている。{足|あし}を{上|あ}げてからの{一塁|いちるい}けんせいは{投球|とうきゅう}と{見分|みわ}けにくく、よく{刺|さ}せる。{二塁|にるい}・{三塁|さんるい}は{体|からだ}を{回|まわ}すので{刺|さ}しにくい。けんせいで{間|ま}があくと、バッターもタイミングを{取|と}りなおしになる。',
+  /** けんせいのあとのヒント */
+  afterHint: '💡 けんせいで{間|ま}があいた。バッターはタイミングの{取|と}りなおしだ。',
 };

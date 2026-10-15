@@ -1,10 +1,10 @@
 // 打者モデル（§4.3）。打者は「この投手はこのリズムで投げてくる」という予想を持ち、
 // 予想とのずれでスイングのタイミングが決まる。純粋関数のみ。
 
-import type { BatterType, PitchResult, Seconds, TimingGrade } from '../types';
+import type { BatterType, PitchResult, PitchType, Seconds, TimingGrade } from '../types';
 import { BATTER_MODEL, BATTERS, CONTACT, PITCH, SWING, TIMING_BANDS } from './constants';
 import { NO_MOD, type ContactMod } from './location';
-import { liftToRelease, sameRhythm, type Segments } from './timing';
+import { flightOf, liftToRelease, sameRhythm, type Segments } from './timing';
 
 export interface BatterState {
   type: BatterType;
@@ -14,15 +14,19 @@ export interface BatterState {
   expLtr: Seconds;
   /** そのうち、予想している「あしあげ」の長さ */
   expS2: Seconds;
+  /** 予想しているボールの速さ（リリースから届くまでの時間） */
+  expFlight: Seconds;
   /** 同じリズムが続いている球数 */
   streak: number;
   /** 直前の投球 */
   last: Segments | null;
+  /** 牽制で待たされて、集中が切れている（次の1球だけ） */
+  unsettled?: boolean;
 }
 
 /** 打席に入るとき。ベンチで見ていたので、投手の「ふつう」を予想している */
 export function initBatter(type: BatterType, base: Segments): BatterState {
-  return { type, expS1: base.s1, expLtr: liftToRelease(base), expS2: base.s2, streak: 0, last: null };
+  return { type, expS1: base.s1, expLtr: liftToRelease(base), expS2: base.s2, expFlight: PITCH.BALL_FLIGHT, streak: 0, last: null };
 }
 
 /** この球を投げたら、同じリズムが何球続くことになるか */
@@ -62,12 +66,14 @@ export function liftWeight(s3: Seconds): number {
  * スイングのタイミング誤差。
  * @param z 標準正規分布の乱数（打者固有のばらつき用）
  */
-export function swingTiming(b: BatterState, p: Segments, z: number): SwingTiming {
+export function swingTiming(b: BatterState, p: Segments & { pitchType?: PitchType }, z: number): SwingTiming {
   const prm = BATTERS[b.type];
   // 主な誤差：実際の長さ − 予想の長さ。「足を上げる速さ」のずれと「上げてから投げるまで」のずれに分ける
   const liftDiff = p.s2 - b.expS2;
   const topDiff = p.s3 + p.s4 - (b.expLtr - b.expS2);
-  let e = topDiff + liftDiff * liftWeight(p.s3);
+  // スローボールは、来るのがおそいぶん早く振ってしまう（見て少しは合わせられる）
+  const flightDiff = flightOf(p) - b.expFlight;
+  let e = topDiff + liftDiff * liftWeight(p.s3) + flightDiff * BATTER_MODEL.SPEED_WEIGHT;
   e *= e > 0 ? prm.earlyGain : prm.lateGain;
   // 短いセットで準備が遅れると、そのぶん差し込まれる
   const rushed = p.s1 < b.expS1 - BATTER_MODEL.S1_SHORT_MARGIN;
@@ -78,6 +84,7 @@ export function swingTiming(b: BatterState, p: Segments, z: number): SwingTiming
   let sigma = prm.sigma;
   const tense = prm.tenseOnLongSet && p.s1 > b.expS1 + BATTER_MODEL.S1_LONG_MARGIN;
   if (tense) sigma *= BATTER_MODEL.S1_LONG_SIGMA_FACTOR;
+  if (b.unsettled) sigma *= BATTER_MODEL.AFTER_PICKOFF_SIGMA;
   // 同じリズムが続くと読まれる
   if (b.streak >= BATTER_MODEL.SAME_STREAK_FOR_BONUS - 1 && b.last && sameRhythm(b.last, p)) {
     sigma *= BATTER_MODEL.SAME_STREAK_SIGMA_FACTOR;
@@ -88,7 +95,7 @@ export function swingTiming(b: BatterState, p: Segments, z: number): SwingTiming
 }
 
 /** 投球を見たあとの予想の更新（指数移動平均） */
-export function updateBatter(b: BatterState, p: Segments): BatterState {
+export function updateBatter(b: BatterState, p: Segments & { pitchType?: PitchType }): BatterState {
   const prm = BATTERS[b.type];
   const streak = streakWith(b, p);
   let alpha = prm.alpha;
@@ -98,18 +105,21 @@ export function updateBatter(b: BatterState, p: Segments): BatterState {
     expS1: b.expS1 + alpha * (p.s1 - b.expS1),
     expLtr: b.expLtr + alpha * (liftToRelease(p) - b.expLtr),
     expS2: b.expS2 + alpha * (p.s2 - b.expS2),
+    expFlight: b.expFlight + alpha * (flightOf(p) - b.expFlight),
     streak,
     last: { s1: p.s1, s2: p.s2, s3: p.s3, s4: p.s4 },
   };
 }
 
-/** プレートを外されたとき：予想が「ふつう」の方へ少し戻る（仕切り直し） */
-export function resetBatter(b: BatterState, base: Segments, amount: number): BatterState {
+/** プレートを外された・牽制されたとき：予想が「ふつう」の方へ少し戻る（仕切り直し）。unsettled = 待たされて集中が切れる */
+export function resetBatter(b: BatterState, base: Segments, amount: number, unsettled = false): BatterState {
   return {
+    unsettled,
     ...b,
     expS1: b.expS1 + amount * (base.s1 - b.expS1),
     expLtr: b.expLtr + amount * (liftToRelease(base) - b.expLtr),
     expS2: b.expS2 + amount * (base.s2 - b.expS2),
+    expFlight: b.expFlight + amount * (PITCH.BALL_FLIGHT - b.expFlight),
     streak: 0,
     last: null,
   };

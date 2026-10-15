@@ -114,6 +114,7 @@ export function Timeline({ records }: { records: PitchRecord[] }) {
                   {r.timingErrorMs}ms
                 </span>
               )}
+              {r.pattern.pitchType === 'slow' && <span className="tl-ms">スロー</span>}
               {r.location && (
                 <span className={`tl-ms tl-zone ${r.zone ?? ''}`}>
                   <R>{ZONE.name(r.location, r.batterHand)}</R>

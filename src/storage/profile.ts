@@ -87,7 +87,7 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const bool = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const KINDS: string[] = ['s1Short', 's1Long', 's2Quick', 's2Slow', 's3Quick', 's3Hold', 's3Long', 'pickoff', 'stepOff'] satisfies ShiftKind[];
+const KINDS: string[] = ['s1Short', 's1Long', 's2Quick', 's2Slow', 's3Quick', 's3Hold', 's3Long', 'slowBall', 'pickoff', 'stepOff'] satisfies ShiftKind[];
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 // ---- 読み込んだものを正しい形にそろえる ----

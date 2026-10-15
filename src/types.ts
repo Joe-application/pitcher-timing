@@ -7,6 +7,14 @@ export type SegmentKey = 's1' | 's2' | 's3' | 's4';
 
 export type PitchEvent = 'pickoff' | 'stepOff';
 
+/** 球種 */
+export type PitchType = 'straight' | 'slow';
+
+/** 牽制する塁 */
+export type PickoffBase = 1 | 2 | 3;
+/** 一塁牽制のやり方（投手は左投げ）。lift = 足を上げてから、quick = 足をあまり上げずにすばやく */
+export type PickoffMove = 'lift' | 'quick';
+
 export interface TimingPattern {
   id: string;
   /** 子どもがつけた名前 */
@@ -21,6 +29,12 @@ export interface TimingPattern {
   s4: Seconds;
   /** 牽制・プレートを外す（S1 の長さ＝その動きを始めるタイミング） */
   event?: PitchEvent | null;
+  /** 球種（書かなければストレート） */
+  pitchType?: PitchType;
+  /** 牽制する塁（書かなければ、盗塁を狙えるいちばん前の走者） */
+  pickoffBase?: PickoffBase;
+  /** 一塁牽制のやり方 */
+  pickoffMove?: PickoffMove;
   createdFrom: 'preset' | 'game' | 'custom';
 }
 
@@ -91,7 +105,7 @@ export type PitchResult =
 export type RunnerEvent = 'steal' | 'caughtStealing';
 
 /** ずらしの種類（振り返り・バッジ・星の判定に使う） */
-export type ShiftKind = 's1Short' | 's1Long' | 's2Quick' | 's2Slow' | 's3Quick' | 's3Hold' | 's3Long' | 'pickoff' | 'stepOff';
+export type ShiftKind = 's1Short' | 's1Long' | 's2Quick' | 's2Slow' | 's3Quick' | 's3Hold' | 's3Long' | 'slowBall' | 'pickoff' | 'stepOff';
 
 export interface PitchRecord {
   stageId: string;

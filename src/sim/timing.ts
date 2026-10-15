@@ -1,7 +1,7 @@
 // 区間の計算と、ルール（ボーク・二段モーション・遅延）の判定。純粋関数のみ。
 
-import type { Baseline, PitchEvent, RuleWarning, Seconds, SegmentKey, ShiftKind, TimingPattern } from '../types';
-import { BASELINE_LIMITS, CARD_DELTA, CARD_LIMITS, DEFAULT_BASELINE, RULES, SAME_TOLERANCE, SHIFT_THRESHOLD, type CardKey, type CardLevel } from './constants';
+import type { Baseline, PitchEvent, PitchType, RuleWarning, Seconds, SegmentKey, ShiftKind, TimingPattern } from '../types';
+import { BASELINE_LIMITS, CARD_DELTA, CARD_LIMITS, DEFAULT_BASELINE, PITCH, RULES, SAME_TOLERANCE, SHIFT_THRESHOLD, type CardKey, type CardLevel } from './constants';
 
 export type Segments = Record<SegmentKey, Seconds>;
 
@@ -19,6 +19,9 @@ const round3 = (v: number) => Math.round(v * 1000) / 1000;
 
 /** 足上げ開始からリリースまで（S2+S3+S4）。打者はこの長さを予想して振る */
 export const liftToRelease = (p: Segments): Seconds => p.s2 + p.s3 + p.s4;
+
+/** リリースからホームベースに届くまでの時間（球種で変わる） */
+export const flightOf = (p: { pitchType?: PitchType }): Seconds => (p.pitchType === 'slow' ? PITCH.SLOW_BALL_FLIGHT : PITCH.BALL_FLIGHT);
 
 /** セット完了からリリースまで */
 export const totalTime = (p: Segments): Seconds => p.s1 + p.s2 + p.s3 + p.s4;
@@ -79,6 +82,7 @@ export function shiftKinds(p: TimingPattern, base: Segments): ShiftKind[] {
   if (d3 <= -SHIFT_THRESHOLD.s3) kinds.push('s3Quick');
   if (d3 >= SHIFT_THRESHOLD.s3Long) kinds.push('s3Long');
   else if (d3 >= SHIFT_THRESHOLD.s3) kinds.push('s3Hold');
+  if (p.pitchType === 'slow') kinds.push('slowBall');
   return kinds;
 }
 

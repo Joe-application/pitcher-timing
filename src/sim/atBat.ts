@@ -1,9 +1,9 @@
 // 打席・イニングの進行。1球ごとに「状態＋投球 → 新しい状態＋記録」を返す純粋関数。
 // 乱数は球ごとのシードから決まった順番で引くので、同じシードと入力なら同じ結果になる（もしもリプレイ用）。
 
-import type { Bases, BatterSpot, Cell, PitchRecord, PitchResult, RuleWarning, RunnerEvent, Seconds, TimingPattern, ZoneKind } from '../types';
+import type { Bases, BatterSpot, Cell, PickoffBase, PitchRecord, PitchResult, RuleWarning, RunnerEvent, Seconds, TimingPattern, ZoneKind } from '../types';
 import { gradeOf, initBatter, resetBatter, streakWith, swingChance, swingResult, swingTiming, updateBatter, type BatterState } from './batter';
-import { LOCATION, PITCH, RULES, RUNNER } from './constants';
+import { BATTER_MODEL, LOCATION, PITCH, RULES, RUNNER } from './constants';
 import { actualCell, contactMod, isFarBall, isStrike, NO_MOD, sameCell, swingAdjust, timingShift, zoneKind } from './location';
 import { createRng, hashSeed } from './rng';
 import { initRunner, pickoffOutChance, resetRunner, stealSuccessChance, stealTryChance, updateRunner, type RunnerState } from './runner';
@@ -85,9 +85,9 @@ export function stealingRunner(bases: Bases): 1 | 2 | null {
   return null;
 }
 
-/** 牽制する相手。盗塁を狙える走者がいなければ、塁にいる走者 */
-export function pickoffTarget(bases: Bases): 1 | 2 | null {
-  return stealingRunner(bases) ?? (bases[1] ? 2 : bases[0] ? 1 : null);
+/** 牽制する相手を指定しなかったとき。盗塁を狙える走者がいなければ、塁にいる走者 */
+export function pickoffTarget(bases: Bases): PickoffBase | null {
+  return stealingRunner(bases) ?? (bases[1] ? 2 : bases[0] ? 1 : bases[2] ? 3 : null);
 }
 
 export function isCleared(cfg: GameConfig, s: GameState): boolean {
@@ -214,9 +214,10 @@ export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern, aim?
     pickoffsInRow++;
     const tooMany = pickoffsInRow > RULES.MAX_PICKOFFS_IN_ROW;
     if (tooMany) warnings.push('tooManyPickoffs');
-    const target = pickoffTarget(bases);
+    // 牽制する塁（その塁に走者がいなければ、いちばん前の走者）
+    const target = p.pickoffBase && bases[p.pickoffBase - 1] ? p.pickoffBase : pickoffTarget(bases);
     if (p.event === 'pickoff' && target && !tooMany) {
-      if (d.pickoff < pickoffOutChance(runner, p.s1)) {
+      if (d.pickoff < pickoffOutChance(runner, p.s1, target, p.pickoffMove)) {
         result = 'pickoffOut';
         bases[target - 1] = false;
         outs++;
@@ -224,6 +225,8 @@ export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern, aim?
         result = 'pickoffSafe';
       }
       runner = resetRunner(runner, base, RUNNER.pickoffReset, true);
+      // 牽制で間があくと、打者も待たされてリズムがくずれる
+      batter = resetBatter(batter, base, BATTER_MODEL.AFTER_PICKOFF_RESET, true);
     } else {
       // 外す（走者がいないときの牽制も、仕切り直しとして扱う）
       result = 'stepOff';
@@ -264,6 +267,7 @@ export function throwPitch(cfg: GameConfig, s: GameState, p: TimingPattern, aim?
       zone = zoneKind(spot, location);
       sameSpot = sameCell(lastCell, location);
       mod = contactMod(zone, location, sameSpot);
+      if (p.pitchType === 'slow') mod = { ...mod, long: mod.long * PITCH.SLOW_BALL_LONG };
       shift = timingShift(location, spot.hand);
       zoneSwing = swingAdjust(zone);
       lastCell = location;

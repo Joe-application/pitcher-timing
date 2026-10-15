@@ -2,17 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { audioContext, schedulePitchSounds, sfx, unlockAudio, type PlateSound } from '../../audio/cues';
-import { BATTER, BUTTONS, describeDiff, managerComment, preHint, RESULT, RUNNER_EVENT, STEAL_COMMENT, timingText, WARNING, ZONE } from '../../game/messages';
+import { BATTER, BUTTONS, describeDiff, managerComment, PICKOFF, preHint, RESULT, RUNNER_EVENT, STEAL_COMMENT, timingText, WARNING, ZONE } from '../../game/messages';
 import { addGameStats, earnedBadges, rankIndex, rankPoints, REALTIME_RANK, summarize } from '../../game/progression';
 import { stageById, type StageDef } from '../../game/stages';
-import { initGame, isBatterOut, isCleared, isOver, pickoffTarget, runnerOn, throwPitch, type GameConfig, type GameState, type PitchOutcome } from '../../sim/atBat';
-import { PITCH, RULES, type CardLevel } from '../../sim/constants';
+import { initGame, isBatterOut, isCleared, isOver, runnerOn, throwPitch, type GameConfig, type GameState, type PitchOutcome } from '../../sim/atBat';
+import { RULES, type CardLevel } from '../../sim/constants';
 import { randomSeed } from '../../sim/rng';
-import { baselineOf, fromCards, NORMAL_CARDS, type Cards } from '../../sim/timing';
+import { baselineOf, flightOf, fromCards, NORMAL_CARDS, type Cards } from '../../sim/timing';
 import { MAX_PATTERNS } from '../../storage/profile';
-import type { BatterSpot, Cell, PitchEvent, PitchRecord, TimingPattern } from '../../types';
+import type { BatterSpot, Cell, PickoffBase, PickoffMove, PitchEvent, PitchRecord, PitchType, TimingPattern } from '../../types';
 import { Board } from '../components/Board';
-import { CardPicker } from '../components/CardPicker';
+import { CardPicker, PitchTypePicker } from '../components/CardPicker';
+import { PickoffButtons } from '../components/PickoffButtons';
 import { BatterCard, Diamond, Dots, Manager } from '../components/Hud';
 import { R } from '../components/Ruby';
 import { Scene, type PitchClock } from '../components/Scene';
@@ -117,6 +118,7 @@ export function BattleScreen() {
   const [saved, setSaved] = useState(false);
   /** ねらうマス。打席ごとに自分で選ぶ */
   const [aim, setAim] = useState<Cell | null>(null);
+  const [pitchType, setPitchType] = useState<PitchType>('straight');
 
   const realtimeOpen = stage.cards.realtime || profile.rank >= REALTIME_RANK;
   const [realtime, setRealtime] = useState(false);
@@ -139,7 +141,7 @@ export function BattleScreen() {
   }, [history]);
 
   const anyRunner = runnerOn(game.bases);
-  const canPickoff = stage.cards.events && pickoffTarget(game.bases) !== null;
+  const canPickoff = stage.cards.events && anyRunner;
   const over = isOver(cfg, game);
 
   // ---- 投げる ----
@@ -154,10 +156,12 @@ export function BattleScreen() {
       const thrown = !c.event && r.result !== 'balk' && !r.warnings.includes('delay');
       soundCancel.current();
       if (c.event === 'pickoff' && c.eventAt != null) {
-        soundCancel.current = schedulePitchSounds({ ...early, forwardAt: c.eventAt, releaseAt: c.eventAt + 150, plateAt: c.eventAt + 600 }, 'mitt');
+        const throwAt = c.eventAt + (c.eventLift ?? 0) * 1000;
+        const lift = c.eventLift ? { liftAt: c.eventAt } : {};
+        soundCancel.current = schedulePitchSounds({ ...early, ...lift, forwardAt: throwAt, releaseAt: throwAt + 150, plateAt: throwAt + 600 }, 'mitt');
       } else if (thrown && c.liftAt != null && c.forwardAt != null) {
         const releaseAt = c.forwardAt + c.s4 * 1000;
-        const plateAt = releaseAt + PITCH.BALL_FLIGHT * 1000;
+        const plateAt = releaseAt + flightOf(p) * 1000;
         const hold = fromSet ? { topAt: c.liftAt + c.s2 * 1000, holdUntil: c.forwardAt } : {};
         const swingAt = r.swung ? plateAt - r.timingErrorMs : undefined;
         soundCancel.current = schedulePitchSounds({ ...early, ...hold, forwardAt: c.forwardAt, releaseAt, plateAt, swingAt }, plateSound(r));
@@ -171,12 +175,23 @@ export function BattleScreen() {
     [cfg, game, aim],
   );
 
-  const throwCards = (event: PitchEvent | null = null) => {
+  /** 牽制の動き（足を上げる牽制なら、足を上げてから投げる） */
+  const pickoffClock = (pb?: PickoffBase, move?: PickoffMove) => ({
+    eventLift: pb === 1 && move === 'lift' ? fromCards(base, cards).s2 : 0,
+    eventLabel: pb ? PICKOFF.scene[pb] : undefined,
+  });
+
+  const throwCards = (event: PitchEvent | null = null, pb?: PickoffBase, move?: PickoffMove) => {
     unlockAudio();
-    const p = fromCards(base, cards, event);
+    const p: TimingPattern = { ...fromCards(base, cards, event), pickoffBase: pb, pickoffMove: move, pitchType: event ? undefined : pitchType };
     const setAt = performance.now() + LEAD_MS;
     const at = setAt + p.s1 * 1000;
-    launch(p, event ? { setAt, liftAt: null, s2: p.s2, forwardAt: null, s4: p.s4, event, eventAt: at } : { setAt, liftAt: at, s2: p.s2, forwardAt: at + (p.s2 + p.s3) * 1000, s4: p.s4 });
+    launch(
+      p,
+      event
+        ? { setAt, liftAt: null, s2: p.s2, forwardAt: null, s4: p.s4, event, eventAt: at, ...pickoffClock(pb, move) }
+        : { setAt, liftAt: at, s2: p.s2, forwardAt: at + (p.s2 + p.s3) * 1000, s4: p.s4, flight: flightOf(p) },
+    );
   };
 
   const onAnimDone = useCallback(() => {
@@ -213,6 +228,7 @@ export function BattleScreen() {
     s3: Math.round(Math.max(0, s3) * 1000) / 1000,
     s4: base.s4,
     event,
+    pitchType: event ? undefined : pitchType,
     createdFrom: 'game',
   });
 
@@ -252,17 +268,18 @@ export function BattleScreen() {
     const s1 = (clock.liftAt - clock.setAt) / 1000;
     const s3 = (forwardAt - clock.liftAt) / 1000 - clock.s2;
     setRt('idle');
-    launch(rtPattern(s1, s3), { ...clock, forwardAt }, false);
+    launch(rtPattern(s1, s3), { ...clock, forwardAt, flight: flightOf({ pitchType }) }, false);
   };
   const rtUpRef = useRef(rtUp);
   rtUpRef.current = rtUp;
 
-  const rtEvent = (event: PitchEvent) => {
+  const rtEvent = (event: PitchEvent, pb?: PickoffBase, move?: PickoffMove) => {
     if (rt !== 'set' || !clock) return;
     window.clearTimeout(rtTimer.current);
     const now = Math.max(performance.now(), clock.setAt);
     setRt('idle');
-    launch(rtPattern((now - clock.setAt) / 1000, 0, event), { ...clock, event, eventAt: now }, false);
+    const p = { ...rtPattern((now - clock.setAt) / 1000, 0, event), pickoffBase: pb, pickoffMove: move };
+    launch(p, { ...clock, event, eventAt: now, ...pickoffClock(pb, move) }, false);
   };
 
   useEffect(
@@ -322,7 +339,7 @@ export function BattleScreen() {
     unlockAudio();
     const setAt = performance.now() + LEAD_MS;
     const at = setAt + p.s1 * 1000;
-    launch({ ...p, event: null }, { setAt, liftAt: at, s2: p.s2, forwardAt: at + (p.s2 + p.s3) * 1000, s4: p.s4 });
+    launch({ ...p, event: null, pitchType }, { setAt, liftAt: at, s2: p.s2, forwardAt: at + (p.s2 + p.s3) * 1000, s4: p.s4, flight: flightOf({ pitchType }) });
   };
 
   // ---- 表示 ----
@@ -371,6 +388,11 @@ export function BattleScreen() {
               <b>
                 <R>{RESULT[shown.result].text}</R>
               </b>
+              {shown.pattern.event === 'pickoff' && shown.pattern.pickoffBase && (
+                <span>
+                  <R>{PICKOFF.name(shown.pattern.pickoffBase, shown.pattern.pickoffMove ?? 'quick')}</R>
+                </span>
+              )}
               {shown.location && (
                 <span>
                   <R>{`${ZONE.name(shown.location, shown.batterHand)}${shown.zone === 'hot' ? '（{得意|とくい}）' : shown.zone === 'cold' ? '（{苦手|にがて}）' : ''}`}</R>
@@ -451,7 +473,7 @@ export function BattleScreen() {
                 <ZonePicker spot={cfg.lineup[game.batterIndex]} aim={aim} onAim={(c) => (sfx.select(), setAim(c))} last={game.lastCell} disabled={phase === 'anim' || rt !== 'idle'} />
                 <div>
                   <p className="hint">
-                    <R>{shown?.runnerEvent === 'steal' ? STEAL_COMMENT : preHint(game.batter.streak, game.batter.type, game.balls, game.strikes)}</R>
+                    <R>{shown?.runnerEvent === 'steal' ? STEAL_COMMENT : preHint(game.batter.streak, game.batter.type, game.balls, game.strikes, game.batter.unsettled)}</R>
                   </p>
                   <p className={`aim-text${aim ? '' : ' need'}`}>
                     <R>{aim ? `🎯 ${ZONE.name(aim, cfg.lineup[game.batterIndex].hand)}` : `👆 ${ZONE.pick}`}</R>
@@ -476,19 +498,16 @@ export function BattleScreen() {
                   <CardPicker seg="s1" value={cards.s1} onChange={(v) => setCards({ ...cards, s1: v })} disabled={phase === 'anim'} />
                   <CardPicker seg="s2" value={cards.s2} onChange={(v) => setCards({ ...cards, s2: v })} disabled={phase === 'anim'} />
                   <CardPicker seg="s3" value={cards.s3} onChange={(v) => setCards({ ...cards, s3: v })} disabled={phase === 'anim'} max={stage.cards.s3Long ? 2 : 1} />
+                  <PitchTypePicker value={pitchType} onChange={setPitchType} disabled={phase === 'anim'} />
                   <p className="muted small-text center">
                     <R>{describeDiff(preview, base)}</R>
                   </p>
+                  {canPickoff && <PickoffButtons bases={game.bases} disabled={phase === 'anim'} onPick={(pb, move) => throwCards('pickoff', pb, move)} />}
                   <div className="row center-row wrap pitch-actions">
                     {stage.cards.events && (
-                      <>
-                        <button className="small" disabled={phase === 'anim' || !canPickoff} onClick={() => throwCards('pickoff')}>
-                          <R>{BUTTONS.pickoff}</R>
-                        </button>
-                        <button className="small" disabled={phase === 'anim'} onClick={() => throwCards('stepOff')}>
-                          <R>{BUTTONS.stepOff}</R>
-                        </button>
-                      </>
+                      <button className="small" disabled={phase === 'anim'} onClick={() => throwCards('stepOff')}>
+                        <R>{BUTTONS.stepOff}</R>
+                      </button>
                     )}
                     <button className="primary big" disabled={phase === 'anim' || !aim} onClick={() => throwCards()}>
                       <R>{BUTTONS.pitch}</R>
@@ -496,7 +515,7 @@ export function BattleScreen() {
                   </div>
                   {stage.cards.events && (
                     <p className="muted small-text center">
-                      <R>{'けんせい・{外|はず}すは、「とまる」で{選|えら}んだ{長|なが}さだけ{止|と}まってから{動|うご}く。'}</R>
+                      <R>{'けんせい・{外|はず}すは、「とまる」で{選|えら}んだ{長|なが}さだけ{止|と}まってから{動|うご}く。{一塁|いちるい}の「{足|あし}を{上|あ}げて」は、「あしあげ」の{速|はや}さで{足|あし}を{上|あ}げてから{投|な}げる。'}</R>
                     </p>
                   )}
                   {profile.patterns.length > 0 && (
@@ -515,6 +534,7 @@ export function BattleScreen() {
               ) : (
                 <div className="controls">
                   <CardPicker seg="s2" value={cards.s2} onChange={(v) => setCards({ ...cards, s2: v })} disabled={phase === 'anim' || rt !== 'idle'} />
+                  <PitchTypePicker value={pitchType} onChange={setPitchType} disabled={phase === 'anim' || rt !== 'idle'} />
                   {rt === 'idle' ? (
                     <button className="primary big rt-button" disabled={phase === 'anim' || !aim} onClick={rtSet}>
                       <R>{BUTTONS.set}</R>
@@ -539,10 +559,8 @@ export function BattleScreen() {
                     </button>
                   )}
                   {stage.cards.events && (
-                    <div className="row center-row">
-                      <button disabled={rt !== 'set' || !canPickoff} onClick={() => rtEvent('pickoff')}>
-                        <R>{BUTTONS.pickoff}</R>
-                      </button>
+                    <div className="row center-row wrap">
+                      {canPickoff && <PickoffButtons bases={game.bases} disabled={rt !== 'set'} onPick={(pb, move) => rtEvent('pickoff', pb, move)} />}
                       <button disabled={rt !== 'set'} onClick={() => rtEvent('stepOff')}>
                         <R>{BUTTONS.stepOff}</R>
                       </button>

@@ -3,14 +3,15 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { schedulePitchSounds, sfx, unlockAudio, type PlateSound } from '../../audio/cues';
-import { describeDiff, HAND, RESULT, TIMING, VERSUS, ZONE } from '../../game/messages';
+import { describeDiff, HAND, PICKOFF, PITCH_TYPE, RESULT, TIMING, VERSUS, ZONE } from '../../game/messages';
 import { initGame, isBatterOut, throwPitch, type GameConfig, type GameState } from '../../sim/atBat';
-import { CARD_LEVELS, PITCH, TIMING_BANDS } from '../../sim/constants';
+import { CARD_LEVELS, TIMING_BANDS } from '../../sim/constants';
 import { randomSeed } from '../../sim/rng';
-import { baselineOf, fromCards, NORMAL_CARDS, totalTime, type Cards } from '../../sim/timing';
-import type { BatterSpot, Cell, Hand, PitchRecord } from '../../types';
-import { CardPicker } from '../components/CardPicker';
+import { baselineOf, flightOf, fromCards, NORMAL_CARDS, totalTime, type Cards } from '../../sim/timing';
+import type { Bases, BatterSpot, Cell, Hand, PickoffBase, PickoffMove, PitchRecord, PitchType, TimingPattern } from '../../types';
+import { CardPicker, PitchTypePicker } from '../components/CardPicker';
 import { Diamond, Dots } from '../components/Hud';
+import { PickoffButtons } from '../components/PickoffButtons';
 import { R } from '../components/Ruby';
 import { Scene, type PitchClock } from '../components/Scene';
 import { PatternBar, SegmentLegend } from '../components/Timeline';
@@ -31,18 +32,29 @@ interface Setup {
 const LEAD_MS = 900;
 /** ボールが届いたあと、ここまでに押せば「振った」ことにする（これを過ぎたら見送り） */
 const LATE_WINDOW_MS = 300;
-const FLIGHT_MS = PITCH.BALL_FLIGHT * 1000;
 const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(Math.random() * xs.length)];
 
+type PickoffChoice = { base: PickoffBase; move: PickoffMove };
+
+/** コンピューターの投手の牽制。むずかしいほうが、ときどき牽制を入れてくる */
+function cpuPickoff(kind: PitcherKind, bases: Bases): PickoffChoice | null {
+  if (!bases.some(Boolean) || Math.random() >= (kind === 'cpuHard' ? 0.2 : 0.08)) return null;
+  if (bases[0]) return { base: 1, move: Math.random() < 0.5 ? 'lift' : 'quick' };
+  if (bases[1]) return { base: 2, move: 'quick' };
+  return Math.random() < 0.3 ? { base: 3, move: 'quick' } : null;
+}
+
 /** コンピューターの投手。やさしい＝同じリズムが多い、むずかしい＝毎球ばらばら */
-function cpuChoice(kind: PitcherKind, prev: Cards | null): { cards: Cards; aim: Cell } {
+function cpuChoice(kind: PitcherKind, prev: Cards | null): { cards: Cards; aim: Cell; pitchType: PitchType } {
   const same = kind === 'cpuEasy' && prev && Math.random() < 0.6;
   const cards: Cards = same ? prev : { s1: pick(CARD_LEVELS.s1), s2: pick(CARD_LEVELS.s2), s3: pick(CARD_LEVELS.s3) };
   // ほとんどはストライクゾーン、ときどきボールゾーン
   const ball = Math.random() < (kind === 'cpuEasy' ? 0.15 : 0.3);
   // ボール球は、ゾーンのすぐ外（きわどいところ）へ
   const aim = ball ? pick([{ x: pick([1, 5]), y: pick([1, 2, 3, 4, 5]) }, { x: pick([2, 3, 4]), y: pick([1, 5]) }]) : { x: pick([2, 3, 4]), y: pick([2, 3, 4]) };
-  return { cards, aim };
+  // むずかしいほうは、スローボールもまぜてくる
+  const pitchType: PitchType = Math.random() < (kind === 'cpuHard' ? 0.25 : 0.1) ? 'slow' : 'straight';
+  return { cards, aim, pitchType };
 }
 
 function plateSound(r: PitchRecord): PlateSound {
@@ -73,10 +85,13 @@ export function VersusScreen() {
   const [game, setGame] = useState<GameState | null>(null);
   const [cards, setCards] = useState<Cards>(NORMAL_CARDS);
   const [aim, setAim] = useState<Cell | null>(null);
+  /** 投手が牽制を選んだとき */
+  const [pickoffSel, setPickoffSel] = useState<PickoffChoice | null>(null);
   const [clock, setClock] = useState<PitchClock | null>(null);
   const [record, setRecord] = useState<PitchRecord | null>(null);
   /** リリースのあと、打者に見せるボールの行き先 */
-  const [incoming, setIncoming] = useState<Cell | null>(null);
+  const [incoming, setIncoming] = useState<{ releaseAt: number; plateAt: number; cell: Cell } | null>(null);
+  const [pitchType, setPitchType] = useState<PitchType>('straight');
   /** 打者ごとの記録（振った球のタイミング） */
   const [swings, setSwings] = useState<[number[], number[]]>([[], []]);
 
@@ -137,21 +152,42 @@ export function VersusScreen() {
     unlockAudio();
     let c = cards;
     let a = aim;
-    if (cpu) {
+    let po = pickoffSel;
+    let pt = pitchType;
+    if (cpu) po = cpuPickoff(setup.pitcher, game.bases);
+    if (cpu && !po) {
       const choice = cpuChoice(setup.pitcher, prevCpu.current);
       c = choice.cards;
       a = choice.aim;
+      pt = choice.pitchType;
       prevCpu.current = c;
       setCards(c);
       setAim(a);
     }
-    if (!a) return;
-    const p = fromCards(base, c);
     const setAt = performance.now() + LEAD_MS;
+    clearLive();
+    setRecord(null);
+    setIncoming(null);
+    if (po) {
+      // ---- 牽制：打者は振らない。投げた時点で結果が決まる ----
+      const p: TimingPattern = { ...fromCards(base, c, 'pickoff'), pickoffBase: po.base, pickoffMove: po.move };
+      const eventAt = setAt + p.s1 * 1000;
+      const eventLift = po.base === 1 && po.move === 'lift' ? p.s2 : 0;
+      const throwAt = eventAt + eventLift * 1000;
+      const o = throwPitch(cfg, game, p);
+      const cancel = schedulePitchSounds({ setAt, liftAt: eventLift ? eventAt : undefined, forwardAt: throwAt, releaseAt: throwAt + 150, plateAt: throwAt + 600 }, 'mitt');
+      live.current = { plateAt: throwAt, done: true, next: o.state, cancel, finish: () => {}, timers: [] };
+      setRecord(o.record);
+      setClock({ setAt, liftAt: null, s2: p.s2, forwardAt: null, s4: p.s4, event: 'pickoff', eventAt, eventLift, eventLabel: PICKOFF.scene[po.base] });
+      setPhase('live');
+      return;
+    }
+    if (!a) return;
+    const p: TimingPattern = { ...fromCards(base, c), pitchType: pt };
     const liftAt = setAt + p.s1 * 1000;
     const forwardAt = liftAt + (p.s2 + p.s3) * 1000;
     const releaseAt = forwardAt + p.s4 * 1000;
-    const plateAt = releaseAt + FLIGHT_MS;
+    const plateAt = releaseAt + flightOf(p) * 1000;
     // ボールの行き先は、振る・振らないに関係なく同じなので、先に計算しておく
     const preview = throwPitch(cfg, game, p, a, { swung: false, errorMs: 0 }).record.location ?? a;
     const cancel = schedulePitchSounds({ setAt, liftAt, topAt: liftAt + p.s2 * 1000, holdUntil: forwardAt, forwardAt, releaseAt });
@@ -172,7 +208,6 @@ export function VersusScreen() {
       };
     };
 
-    clearLive();
     live.current = {
       plateAt,
       done: false,
@@ -180,15 +215,13 @@ export function VersusScreen() {
       cancel,
       finish,
       timers: [
-        // リリースの瞬間に、ボールの行き先を見せる（見きわめの練習）
-        window.setTimeout(() => setIncoming(preview), releaseAt - performance.now()),
         // 振らなかったら見送り
         window.setTimeout(() => finish({ swung: false, errorMs: 0 }), plateAt + LATE_WINDOW_MS - performance.now()),
       ],
     };
-    setRecord(null);
-    setIncoming(null);
-    setClock({ setAt, liftAt, s2: p.s2, forwardAt, s4: p.s4 });
+    // リリースのあと、投手側から見た図にボールが飛んでくる（コースと高さの見きわめ用）
+    setIncoming({ releaseAt, plateAt, cell: preview });
+    setClock({ setAt, liftAt, s2: p.s2, forwardAt, s4: p.s4, flight: flightOf(p) });
     setPhase('live');
   };
 
@@ -211,6 +244,8 @@ export function VersusScreen() {
     if (record.runsScored > 0) {
       setRuns((r) => (batterIdx === 0 ? [r[0] + record.runsScored, r[1]] : [r[0], r[1] + record.runsScored]));
       sfx.run();
+    } else if (record.result === 'pickoffOut') {
+      sfx.out(2);
     } else if (isBatterOut(record)) {
       if (record.result === 'swingMiss' || record.result === 'take') sfx.strikeout();
       else sfx.out();
@@ -227,6 +262,7 @@ export function VersusScreen() {
       return;
     }
     if (record?.atBatEnd) setAim(null);
+    setPickoffSel(null);
     setPhase(cpu ? 'ready' : 'pick');
   };
 
@@ -318,7 +354,6 @@ export function VersusScreen() {
   if (!cfg || !game) return null;
   const inningNo = cpu ? half + 1 : Math.floor(half / 2) + 1;
   const scoreLine = cpu ? `${batterName} ${runs[0]}{点|てん}` : `${setup.names[0]} ${runs[0]} − ${runs[1]} ${setup.names[1]}`;
-  const pattern = fromCards(base, cards);
   const stat = (xs: number[]) => {
     if (xs.length === 0) return '—';
     const just = xs.filter((x) => Math.abs(x) <= TIMING_BANDS.just * 1000).length;
@@ -365,8 +400,20 @@ export function VersusScreen() {
             <CardPicker seg="s1" value={cards.s1} onChange={(v) => setCards({ ...cards, s1: v })} />
             <CardPicker seg="s2" value={cards.s2} onChange={(v) => setCards({ ...cards, s2: v })} />
             <CardPicker seg="s3" value={cards.s3} onChange={(v) => setCards({ ...cards, s3: v })} />
+            <PitchTypePicker value={pitchType} onChange={setPitchType} />
+            <PickoffButtons bases={game.bases} onPick={(b, move) => (sfx.select(), setPickoffSel({ base: b, move }))} />
+            {pickoffSel && (
+              <p className="center">
+                <b>
+                  <R>{`👉 ${PICKOFF.name(pickoffSel.base, pickoffSel.move)} をする`}</R>
+                </b>{' '}
+                <button className="small ghost" onClick={() => setPickoffSel(null)}>
+                  <R>{'やめる'}</R>
+                </button>
+              </p>
+            )}
             <div className="row center-row">
-              <button className="primary big" disabled={!aim} onClick={() => setPhase('ready')}>
+              <button className="primary big" disabled={!aim && !pickoffSel} onClick={() => setPhase('ready')}>
                 <R>{VERSUS.decided}</R>
               </button>
             </div>
@@ -413,7 +460,10 @@ export function VersusScreen() {
               {phase === 'live' && (
                 <>
                   <div className="versus-incoming">
-                    <ZonePicker spot={spot} aim={null} last={incoming} disabled />
+                    <p className="muted small-text center">
+                      <R>{VERSUS.viewNote}</R>
+                    </p>
+                    <ZonePicker spot={spot} aim={null} incoming={incoming} disabled />
                   </div>
                   <button
                     className="swing-button"
@@ -425,7 +475,20 @@ export function VersusScreen() {
                   </button>
                 </>
               )}
-              {phase === 'shown' && record && (
+              {phase === 'shown' && record && record.pattern.event === 'pickoff' && (
+                <div className="card center">
+                  <h3>
+                    <R>{`${pitcherName} の${PICKOFF.name(record.pattern.pickoffBase ?? 1, record.pattern.pickoffMove ?? 'quick')}`}</R>
+                  </h3>
+                  <p>
+                    <R>{PICKOFF.afterHint}</R>
+                  </p>
+                  <button className="primary big" onClick={afterShown}>
+                    <R>{game.outs >= 3 ? VERSUS.changeSides : VERSUS.nextPitch}</R>
+                  </button>
+                </div>
+              )}
+              {phase === 'shown' && record && record.pattern.event !== 'pickoff' && (
                 <div className="card">
                   <h3>
                     <R>{`${pitcherName} が{選|えら}んだ{間|ま}`}</R>
@@ -433,7 +496,7 @@ export function VersusScreen() {
                   <SegmentLegend />
                   <PatternBar p={record.pattern} scale={Math.max(3.4, totalTime(record.pattern) * 1.05)} showSeconds />
                   <p className="small-text">
-                    <R>{describeDiff(pattern, base)}</R>
+                    <R>{`${PITCH_TYPE[record.pattern.pitchType ?? 'straight']}・${describeDiff(record.pattern, base)}`}</R>
                     {record.aim && (
                       <span className="muted">
                         {' ／ '}
